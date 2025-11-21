@@ -20,7 +20,7 @@ struct UintMetadata {
 @group(0) @binding(5) var<storage, read_write> v_new: array<f32>;
 
 // these values are at cell centers, so will have size width x height
-@group(0) @binding(6) var<storage, read_write> pressure: array<f32>;
+@group(0) @binding(6) var<storage, read> pressure: array<f32>;
 @group(0) @binding(7) var<storage, read_write> new_pressure: array<f32>;
 @group(0) @binding(8) var<storage, read_write> divergence: array<f32>;
 @group(0) @binding(9) var<storage, read> obstacles: array<f32>;
@@ -151,6 +151,10 @@ fn sample_divergence(x: f32, y: f32) -> f32 {
                     s *         t * c11;
 }
 
+fn is_obstacle(i: u32, j: u32) -> bool {
+    return obstacles[idx_center(i, j)] > 0.5;
+}
+
 
 
 @compute @workgroup_size(16, 16)
@@ -220,3 +224,169 @@ fn advect_main(
     }
 }
 
+
+@compute @workgroup_size(16, 16)
+fn divergence_main(
+    @builtin(global_invocation_id) global_id : vec3u,
+    @builtin(workgroup_id) workgroup_id : vec3u,
+    @builtin(local_invocation_id) local_id : vec3u,
+) {
+    // this assumes cell_size = 1.0 for simplicity
+    let i = global_id.x;
+    let j = global_id.y;
+
+    if (i >= uint_metadata.width || j >= uint_metadata.height) {
+        return;
+    }
+
+    let idx = idx_center(i, j);
+    if (is_obstacle(i, j)) {
+        divergence[idx] = 0.0;
+        return;
+    }
+
+    var u_right = 0.0;
+    var u_left = 0.0;
+    var v_top = 0.0;
+    var v_bottom = 0.0;
+
+    if (i + 1u < uint_metadata.width && !is_obstacle(i + 1u, j)) {
+        u_right = u[idx_u(i + 1u, j)];
+    }
+    if (i > 0u && !is_obstacle(i - 1u, j)) {
+        u_left = u[idx_u(i, j)];
+    }
+    if (j + 1u < uint_metadata.height && !is_obstacle(i, j + 1u)) {
+        v_top = v[idx_v(i, j + 1u)];
+    }
+    if (j > 0u && !is_obstacle(i, j - 1u)) {
+        v_bottom = v[idx_v(i, j)];
+    }
+
+    // let u_right = u[idx_u(i + 1u, j)];
+    // let u_left = u[idx_u(i, j)];
+    // let v_top = v[idx_v(i, j + 1u)];
+    // let v_bottom = v[idx_v(i, j)];
+
+    // TODO: might need to normalize (divide) by cell size here
+    let div = (u_right - u_left) + (v_top - v_bottom);
+    divergence[idx_center(i, j)] = div;
+}
+
+
+
+@compute @workgroup_size(16, 16)
+fn pressure_solve_main(
+    @builtin(global_invocation_id) global_id : vec3u,
+    @builtin(workgroup_id) workgroup_id : vec3u,
+    @builtin(local_invocation_id) local_id : vec3u,
+) {
+    // this assumes cell_size = 1.0 for simplicity
+    let i = global_id.x;
+    let j = global_id.y;
+
+    if (i >= uint_metadata.width || j >= uint_metadata.height) {
+        return;
+    }
+
+    let idx = idx_center(i, j);
+    if (is_obstacle(i, j)) {
+        new_pressure[idx] = 0.0;
+        return;
+    }
+
+    var num_neighbors = 0.0;
+    var sum_neighbors = 0.0;
+
+    if (i > 0u && !is_obstacle(i - 1u, j)) {
+        sum_neighbors = sum_neighbors + pressure[idx_center(i - 1u, j)];
+        num_neighbors = num_neighbors + 1.0;
+    }
+    if (i + 1u < uint_metadata.width && !is_obstacle(i + 1u, j)) {
+        sum_neighbors = sum_neighbors + pressure[idx_center(i + 1u, j)];
+        num_neighbors = num_neighbors + 1.0;
+    }
+    if (j > 0u && !is_obstacle(i, j - 1u)) {
+        sum_neighbors = sum_neighbors + pressure[idx_center(i, j - 1u)];
+        num_neighbors = num_neighbors + 1.0;
+    }
+    if (j + 1u < uint_metadata.height && !is_obstacle(i, j + 1u)) {
+        sum_neighbors = sum_neighbors + pressure[idx_center(i, j + 1u)];
+        num_neighbors = num_neighbors + 1.0;
+    }
+
+    let div = divergence[idx_center(i, j)];
+    // let new_p = (div + sum_neighbors) / num_neighbors;
+    let new_p = (sum_neighbors - div) / num_neighbors;
+
+    new_pressure[idx_center(i, j)] = new_p;
+}
+
+
+@compute @workgroup_size(16, 16)
+fn project_main(
+    @builtin(global_invocation_id) global_id : vec3u,
+    @builtin(workgroup_id) workgroup_id : vec3u,
+    @builtin(local_invocation_id) local_id : vec3u,
+) {
+    // this assumes cell_size = 1.0 for simplicity
+    let i = global_id.x;
+    let j = global_id.y;
+
+
+    // project u
+    // u is a grid of size (width + 1) x height
+    if (i > 0u && i < uint_metadata.width && j < uint_metadata.height) {
+        let idx_left = idx_center(i - 1u, j);
+        let idx_right = idx_center(i, j);
+
+        let solid_left = is_obstacle(i - 1u, j);
+        let solid_right = is_obstacle(i, j);
+
+        let face_idx = idx_u(i, j);
+
+        if (solid_left || solid_right) {
+            u_new[face_idx] = 0.0;
+            return;
+        } else {
+            let p_dif = pressure[idx_right] - pressure[idx_left];
+            u_new[face_idx] = u[face_idx] - p_dif;
+        }
+    }
+
+    // project v
+    // v is a grid of size width x (height + 1)
+    if (i < uint_metadata.width && j > 0u && j < uint_metadata.height) {
+        let idx_bottom = idx_center(i, j - 1u);
+        let idx_top = idx_center(i, j);
+
+        let solid_bottom = is_obstacle(i, j - 1u);
+        let solid_top = is_obstacle(i, j);
+
+        let face_idx = idx_v(i, j);
+        
+        if (solid_bottom || solid_top) {
+            v_new[face_idx] = 0.0;
+            return;
+        } else {
+            let p_dif = pressure[idx_top] - pressure[idx_bottom];
+            v_new[face_idx] = v[face_idx] - p_dif;
+        }
+    }
+}
+
+
+@compute @workgroup_size(16, 16)
+fn cleanup_main(
+    @builtin(global_invocation_id) global_id : vec3u,
+    @builtin(workgroup_id) workgroup_id : vec3u,
+    @builtin(local_invocation_id) local_id : vec3u,
+) {
+    let i = global_id.x;
+    let j = global_id.y;
+
+    // swap dye and dye_new
+    if (i < uint_metadata.width && j < uint_metadata.height) {
+        dye_new[idx_center(i, j)] = dye[idx_center(i, j)];
+    }
+}

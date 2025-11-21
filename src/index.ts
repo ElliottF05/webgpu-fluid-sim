@@ -39,8 +39,17 @@ device.queue.writeBuffer(floatMetadataBuffer, 0, floatMetadata.buffer, floatMeta
 
 
 // 2) Velocity buffers (u and v components)
-const uVelocity = new Float32Array((width + 1) * height).fill(0.0);
+const uVelocity = new Float32Array((width + 1) * height).fill(10.0);
 const vVelocity = new Float32Array(width * (height + 1)).fill(0.0);
+
+// TEMP: initialize a rightward flow in the u velocity
+// for (let y = 0; y < height; ++y) {
+//   const left_x = 10;
+//   const right_x = 30;
+//   for (let x = left_x; x < right_x; ++x) {
+//     uVelocity[y * (width + 1) + x] = 30.0;
+//   }
+// }
 
 const newUVelocity = new Float32Array((width + 1) * height).fill(0.0);
 const newVVelocity = new Float32Array(width * (height + 1)).fill(0.0);
@@ -83,12 +92,15 @@ function createCellCenterBuffer(initialData: Float32Array): GPUBuffer {
 const dye = new Float32Array(width * height).fill(0.0);
 const newDye = new Float32Array(width * height).fill(0.0);
 
-// TEMP: initialize a vertical line of dye near the left edge
+// TEMP: initialize a checkerboard dye pattern
+const checkerSize = 50;
 for (let y = 0; y < height; ++y) {
-  const left_x = 20;
-  const right_x = 40;
-  for (let x = left_x; x < right_x; ++x) {
-    dye[y * width + x] = 1.0;
+  for (let x = 0; x < width; ++x) {
+    const checkerX = Math.floor(x / checkerSize);
+    const checkerY = Math.floor(y / checkerSize);
+    if ((checkerX + checkerY) % 2 === 0) {
+      dye[y * width + x] = 1.0;
+    }
   }
 }
 
@@ -104,6 +116,24 @@ const divergence = new Float32Array(width * height).fill(0.0);
 const divergenceBuffer = createCellCenterBuffer(divergence);
 
 const obstacles = new Float32Array(width * height).fill(0);
+// set borders as obstacles
+for (let y = 0; y < height; ++y) {
+  obstacles[y * width + 0] = 1.0;
+  obstacles[y * width + (width - 1)] = 1.0;
+}
+for (let x = 0; x < width; ++x) {
+  obstacles[0 * width + x] = 1.0;
+  obstacles[(height - 1) * width + x] = 1.0;
+}
+// add a central square obstacle
+const obstacleSize = 100;
+const startX = Math.floor((width - obstacleSize) / 2);
+const startY = Math.floor((height - obstacleSize) / 2);
+for (let y = startY; y < startY + obstacleSize; ++y) {
+  for (let x = startX; x < startX + obstacleSize; ++x) {
+    obstacles[y * width + x] = 1.0;
+  }
+}
 const obstaclesBuffer = createCellCenterBuffer(obstacles);
 
 
@@ -121,7 +151,7 @@ const advectionPipeline = device.createComputePipeline({
 });
 
 
-const computeBindGroupAB = device.createBindGroup({
+const advectionBindGroup = device.createBindGroup({
   layout: advectionPipeline.getBindGroupLayout(0),
   entries: [
     { binding: 0, resource: { buffer: floatMetadataBuffer } },
@@ -139,22 +169,134 @@ const computeBindGroupAB = device.createBindGroup({
   ],
 });
 
-const computeBindGroupBA = device.createBindGroup({
-  layout: advectionPipeline.getBindGroupLayout(0),
+
+// Divergence pipeline
+const divergencePipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "divergence_main",
+  },
+});
+
+const divergenceBindGroup = device.createBindGroup({
+  layout: divergencePipeline.getBindGroupLayout(0),
   entries: [
-    { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    { binding: 2, resource: { buffer: newUBuffer } },
+    { binding: 3, resource: { buffer: newVBuffer } },
+    // { binding: 4, resource: { buffer: newUBuffer } },
+    // { binding: 5, resource: { buffer: newVBuffer } },
+    // { binding: 6, resource: { buffer: newPressureBuffer } },
+    // { binding: 7, resource: { buffer: pressureBuffer } },
+    { binding: 8, resource: { buffer: divergenceBuffer } },
+    { binding: 9, resource: { buffer: obstaclesBuffer } },
+    // { binding: 10, resource: { buffer: newDyeBuffer } },
+    // { binding: 11, resource: { buffer: dyeBuffer } },
+  ],
+});
+
+
+// Pressure solve pipeline
+const pressureSolvePipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "pressure_solve_main",
+  },
+});
+
+const pressureSolveBindGroupA = device.createBindGroup({
+  layout: pressureSolvePipeline.getBindGroupLayout(0),
+  entries: [
+    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    // { binding: 2, resource: { buffer: uBuffer } },
+    // { binding: 3, resource: { buffer: vBuffer } },
+    // { binding: 4, resource: { buffer: newUBuffer } },
+    // { binding: 5, resource: { buffer: newVBuffer } },
+    { binding: 6, resource: { buffer: pressureBuffer } },
+    { binding: 7, resource: { buffer: newPressureBuffer } },
+    { binding: 8, resource: { buffer: divergenceBuffer } },
+    { binding: 9, resource: { buffer: obstaclesBuffer } },
+    // { binding: 10, resource: { buffer: dyeBuffer } },
+    // { binding: 11, resource: { buffer: newDyeBuffer } },
+  ]
+});
+
+const pressureSolveBindGroupB = device.createBindGroup({
+  layout: pressureSolvePipeline.getBindGroupLayout(0),
+  entries: [
+    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    // { binding: 2, resource: { buffer: uBuffer } },
+    // { binding: 3, resource: { buffer: vBuffer } },
+    // { binding: 4, resource: { buffer: newUBuffer } },
+    // { binding: 5, resource: { buffer: newVBuffer } },
+    { binding: 6, resource: { buffer: newPressureBuffer } },
+    { binding: 7, resource: { buffer: pressureBuffer } },
+    { binding: 8, resource: { buffer: divergenceBuffer } },
+    { binding: 9, resource: { buffer: obstaclesBuffer } },
+    // { binding: 10, resource: { buffer: dyeBuffer } },
+    // { binding: 11, resource: { buffer: newDyeBuffer } },
+  ]
+});
+
+
+// Projection pipeline
+const projectionPipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "project_main",
+  },
+});
+
+const projectionBindGroup = device.createBindGroup({
+  layout: projectionPipeline.getBindGroupLayout(0),
+  entries: [
+    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
     { binding: 1, resource: { buffer: uintMetadataBuffer } },
     { binding: 2, resource: { buffer: newUBuffer } },
     { binding: 3, resource: { buffer: newVBuffer } },
     { binding: 4, resource: { buffer: uBuffer } },
     { binding: 5, resource: { buffer: vBuffer } },
-    // { binding: 6, resource: { buffer: newPressureBuffer } },
-    // { binding: 7, resource: { buffer: pressureBuffer } },
+    { binding: 6, resource: { buffer: pressureBuffer } },
+    // { binding: 7, resource: { buffer: newPressureBuffer } },
+    // { binding: 8, resource: { buffer: divergenceBuffer } },
+    { binding: 9, resource: { buffer: obstaclesBuffer } },
+    // { binding: 10, resource: { buffer: dyeBuffer } },
+    // { binding: 11, resource: { buffer: newDyeBuffer } },
+  ]
+});
+
+
+// Cleanup pipeline
+const cleanupPipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "cleanup_main",
+  },
+});
+
+const cleanupBindGroup = device.createBindGroup({
+  layout: cleanupPipeline.getBindGroupLayout(0),
+  entries: [
+    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    // { binding: 2, resource: { buffer: newUBuffer } },
+    // { binding: 3, resource: { buffer: newVBuffer } },
+    // { binding: 4, resource: { buffer: uBuffer } },
+    // { binding: 5, resource: { buffer: vBuffer } },
+    // { binding: 6, resource: { buffer: pressureBuffer } },
+    // { binding: 7, resource: { buffer: newPressureBuffer } },
     // { binding: 8, resource: { buffer: divergenceBuffer } },
     // { binding: 9, resource: { buffer: obstaclesBuffer } },
     { binding: 10, resource: { buffer: newDyeBuffer } },
     { binding: 11, resource: { buffer: dyeBuffer } },
-  ],
+  ]
 });
 
 
@@ -175,7 +317,7 @@ const renderPipeline = device.createRenderPipeline({
   },
 });
 
-const graphicsBindGroupA = device.createBindGroup({
+const renderBindGroup = device.createBindGroup({
   layout: renderPipeline.getBindGroupLayout(0),
   entries: [
     { binding: 0, resource: { buffer: dyeBuffer } },
@@ -183,24 +325,16 @@ const graphicsBindGroupA = device.createBindGroup({
   ],
 });
 
-const graphicsBindGroupB = device.createBindGroup({
-  layout: renderPipeline.getBindGroupLayout(0),
-  entries: [
-    { binding: 0, resource: { buffer: newDyeBuffer } },
-    { binding: 1, resource: { buffer: uintMetadataBuffer } },
-  ],
-});
-
 
 
 // ----- Main simulation loop -----
-let ping = true;
+const numJacobiIterations = 10;
 
 const workgroupX = 16;
 const workgroupY = 16;
 
 const dispatchX = Math.ceil((width + 1) / workgroupX);
-const dispatchY = Math.ceil((height +1) / workgroupY);
+const dispatchY = Math.ceil((height + 1) / workgroupY);
 
 function frame() {
   const commandEncoder = device.createCommandEncoder();
@@ -208,17 +342,41 @@ function frame() {
   // Compute pass
   {
     const computePass = commandEncoder.beginComputePass();
-    computePass.setPipeline(advectionPipeline);
 
-    // First half step
-    if (ping) {
-      computePass.setBindGroup(0, computeBindGroupAB);
-    } else {
-      computePass.setBindGroup(0, computeBindGroupBA);
-    }
+    // 1) Advection
+    computePass.setPipeline(advectionPipeline);
+    computePass.setBindGroup(0, advectionBindGroup); // u, v, dye -> new u, new v, new dye
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    // 2) Divergence
+    computePass.setPipeline(divergencePipeline);
+    computePass.setBindGroup(0, divergenceBindGroup); // new u, new v -> divergence
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    // 3) Pressure solve (Jacobi iterations)
+    computePass.setPipeline(pressureSolvePipeline);
+    for (let i = 0; i < numJacobiIterations / 2; ++i) {
+      if (i % 2 === 0) {
+        computePass.setBindGroup(0, pressureSolveBindGroupA); // pressure, divergence -> new pressure
+        computePass.dispatchWorkgroups(dispatchX, dispatchY);
+        computePass.setBindGroup(0, pressureSolveBindGroupB); // new_pressure, divergence -> pressure
+        computePass.dispatchWorkgroups(dispatchX, dispatchY);
+      }
+    }
+
+    // 4) Projection
+    computePass.setPipeline(projectionPipeline);
+    computePass.setBindGroup(0, projectionBindGroup); // new_u, new_v, pressure -> corrected u, v
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    // 5) Cleanup / copy new buffers to current buffers
+    computePass.setPipeline(cleanupPipeline);
+    computePass.setBindGroup(0, cleanupBindGroup);
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
     computePass.end();
   }
+
   // Render pass
   {
     const textureView = context.getCurrentTexture().createView();
@@ -234,14 +392,13 @@ function frame() {
     });
 
     renderPass.setPipeline(renderPipeline);
-    renderPass.setBindGroup(0, ping ? graphicsBindGroupB : graphicsBindGroupA);
+    renderPass.setBindGroup(0, renderBindGroup);
     renderPass.draw(3);
     renderPass.end();
   }
 
   device.queue.submit([commandEncoder.finish()]);
 
-  ping = !ping;
   requestAnimationFrame(frame);
 }
 
