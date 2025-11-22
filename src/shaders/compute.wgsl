@@ -1,66 +1,81 @@
 struct FloatMetadata {
     delta_time: f32,
-    over_relaxation: f32,
+    cell_size: f32,
+    diffusion_rate: f32,
+    viscosity: f32,
 }
 
 struct UintMetadata {
     width: u32,
     height: u32,
-    num_iters: u32,
 }
 
-// input and output buffers
+// metadata buffers
 @group(0) @binding(0) var<uniform> float_metadata: FloatMetadata;
 @group(0) @binding(1) var<uniform> uint_metadata: UintMetadata;
 
-// velocity fields (staggered grid)
-@group(0) @binding(2) var<storage, read_write> u: array<f32>; // size = (width + 1) * height
-@group(0) @binding(3) var<storage, read_write> v: array<f32>; // size = width * (height + 1)
+// velocity fields
+@group(0) @binding(2) var<storage, read_write> u: array<f32>;
+@group(0) @binding(3) var<storage, read_write> v: array<f32>;
 @group(0) @binding(4) var<storage, read_write> u_new: array<f32>;
 @group(0) @binding(5) var<storage, read_write> v_new: array<f32>;
 
-// these values are at cell centers, so will have size width x height
-@group(0) @binding(6) var<storage, read> pressure: array<f32>;
-@group(0) @binding(7) var<storage, read_write> new_pressure: array<f32>;
-@group(0) @binding(8) var<storage, read_write> divergence: array<f32>;
-@group(0) @binding(9) var<storage, read> obstacles: array<u32>;
-@group(0) @binding(10) var<storage, read_write> dye: array<f32>;
-@group(0) @binding(11) var<storage, read_write> dye_new: array<f32>;
-@group(0) @binding(12) var<storage, read> dye_sources: array<f32>;
+// density field
+@group(0) @binding(6) var<storage, read_write> density: array<f32>;
+@group(0) @binding(7) var<storage, read_write> density_new: array<f32>;
 
-// velocity sources
-@group(0) @binding(13) var<storage, read> u_sources: array<f32>; // size = (width + 1) * height
-@group(0) @binding(14) var<storage, read> v_sources: array<f32>; // size = width * (height + 1)
+// divergence and pressure
+@group(0) @binding(8) var<storage, read_write> divergence: array<f32>;
+@group(0) @binding(9) var<storage, read_write> pressure: array<f32>;
+
+// density sources field
+@group(0) @binding(10) var<storage, read> density_sources: array<f32>;
+
+// velocity sources field
+@group(0) @binding(11) var<storage, read> u_sources: array<f32>;
+@group(0) @binding(12) var<storage, read> v_sources: array<f32>;
+
+
 
 
 // helper functions
-fn idx_u(i: u32, j: u32) -> u32 {
-    return j * (uint_metadata.width + 1u) + i;
-}
-
-fn idx_v(i: u32, j: u32) -> u32 {
-    return j * uint_metadata.width + i;
-}
-
 fn idx_center(i: u32, j: u32) -> u32 {
     return j * uint_metadata.width + i;
 }
 
-fn sample_u(x: f32, y: f32) -> f32 {
-    // each u value is at (i, j + 0.5)
-    // clamp position to u's valid domain
-    let x_c = clamp(x, 0.0, f32(uint_metadata.width));
-    let y_c = clamp(y, 0.5, f32(uint_metadata.height) - 0.5);
+fn sample_density(x: f32, y: f32) -> f32 {
+    // each density value is centered at (i,j)
+    // use interpolation
+    let i = u32(floor(x));
+    let j = u32(floor(y));
     
-    let i = u32(floor(x_c));
-    let j = u32(floor(y_c - 0.5));
-    let s = x_c - f32(i);
-    let t = y_c - f32(j) - 0.5;
+    let s = x - f32(i);
+    let t = y - f32(j);
 
-    let u00 = u[idx_u(i, j)];
-    let u10 = u[idx_u(i + 1u, j)];
-    let u01 = u[idx_u(i, j + 1u)];
-    let u11 = u[idx_u(i + 1u, j + 1u)];
+    let d00 = density[idx_center(i, j)];
+    let d10 = density[idx_center(i + 1u, j)];
+    let d01 = density[idx_center(i, j + 1u)];
+    let d11 = density[idx_center(i + 1u, j + 1u)];
+
+    return  (1.0 - s) * (1.0 - t) * d00 +
+                    s * (1.0 - t) * d10 +
+            (1.0 - s) *         t * d01 +
+                    s *         t * d11;
+}
+
+fn sample_u(x: f32, y: f32) -> f32 {
+    // each density value is centered at (i,j)
+    // use interpolation
+    let i = u32(floor(x));
+    let j = u32(floor(y));
+    
+    let s = x - f32(i);
+    let t = y - f32(j);
+
+    let u00 = u[idx_center(i, j)];
+    let u10 = u[idx_center(i + 1u, j)];
+    let u01 = u[idx_center(i, j + 1u)];
+    let u11 = u[idx_center(i + 1u, j + 1u)];
 
     return  (1.0 - s) * (1.0 - t) * u00 +
                     s * (1.0 - t) * u10 +
@@ -69,20 +84,18 @@ fn sample_u(x: f32, y: f32) -> f32 {
 }
 
 fn sample_v(x: f32, y: f32) -> f32 {
-    // each v value is at (i + 0.5, j)
-    // clamp position to v's valid domain
-    let x_c = clamp(x, 0.5, f32(uint_metadata.width) - 0.5);
-    let y_c = clamp(y, 0.0, f32(uint_metadata.height));
+    // each density value is centered at (i,j)
+    // use interpolation
+    let i = u32(floor(x));
+    let j = u32(floor(y));
+    
+    let s = x - f32(i);
+    let t = y - f32(j);
 
-    let i = u32(floor(x_c - 0.5));
-    let j = u32(floor(y_c));
-    let s = x_c - f32(i) - 0.5;
-    let t = y_c - f32(j);
-
-    let v00 = v[idx_v(i, j)];
-    let v10 = v[idx_v(i + 1u, j)];
-    let v01 = v[idx_v(i, j + 1u)];
-    let v11 = v[idx_v(i + 1u, j + 1u)];
+    let v00 = v[idx_center(i, j)];
+    let v10 = v[idx_center(i + 1u, j)];
+    let v01 = v[idx_center(i, j + 1u)];
+    let v11 = v[idx_center(i + 1u, j + 1u)];
 
     return  (1.0 - s) * (1.0 - t) * v00 +
                     s * (1.0 - t) * v10 +
@@ -90,88 +103,9 @@ fn sample_v(x: f32, y: f32) -> f32 {
                     s *         t * v11;
 }
 
-fn sample_pressure(x: f32, y: f32) -> f32 {
-    // each pressure value is at (i + 0.5, j + 0.5)
-    // clamp position to pressure's valid domain
-    let x_c = clamp(x, 0.5, f32(uint_metadata.width) - 0.5);
-    let y_c = clamp(y, 0.5, f32(uint_metadata.height) - 0.5);
-
-    let i = u32(floor(x_c - 0.5));
-    let j = u32(floor(y_c - 0.5));
-    let s = x_c - f32(i) - 0.5;
-    let t = y_c - f32(j) - 0.5;
-
-    let c00 = pressure[idx_center(i, j)];
-    let c10 = pressure[idx_center(i + 1u, j)];
-    let c01 = pressure[idx_center(i, j + 1u)];
-    let c11 = pressure[idx_center(i + 1u, j + 1u)];
-
-    return  (1.0 - s) * (1.0 - t) * c00 +
-                    s * (1.0 - t) * c10 +
-            (1.0 - s) *         t * c01 +
-                    s *         t * c11;
-}
-
-fn sample_dye(x: f32, y: f32) -> f32 {
-    // each dye value is at (i + 0.5, j + 0.5)
-    // clamp position to dye's valid domain
-    let x_c = clamp(x, 0.5, f32(uint_metadata.width) - 0.5);
-    let y_c = clamp(y, 0.5, f32(uint_metadata.height) - 0.5); 
-    
-    let i = u32(floor(x_c - 0.5));
-    let j = u32(floor(y_c - 0.5));
-    let s = x_c - f32(i) - 0.5;
-    let t = y_c - f32(j) - 0.5;
-
-    let c00 = dye[idx_center(i, j)];
-    let c10 = dye[idx_center(i + 1u, j)];
-    let c01 = dye[idx_center(i, j + 1u)];
-    let c11 = dye[idx_center(i + 1u, j + 1u)];
-
-    return  (1.0 - s) * (1.0 - t) * c00 +
-                    s * (1.0 - t) * c10 +
-            (1.0 - s) *         t * c01 +
-                    s *         t * c11;
-}
-
-fn sample_divergence(x: f32, y: f32) -> f32 {
-    // each divergence value is at (i + 0.5, j + 0.5)
-    // clamp position to dye's valid domain
-    let x_c = clamp(x, 0.5, f32(uint_metadata.width) - 0.5);
-    let y_c = clamp(y, 0.5, f32(uint_metadata.height) - 0.5); 
-    
-    let i = u32(floor(x_c - 0.5));
-    let j = u32(floor(y_c - 0.5));
-    let s = x_c - f32(i) - 0.5;
-    let t = y_c - f32(j) - 0.5;
-
-    let c00 = divergence[idx_center(i, j)];
-    let c10 = divergence[idx_center(i + 1u, j)];
-    let c01 = divergence[idx_center(i, j + 1u)];
-    let c11 = divergence[idx_center(i + 1u, j + 1u)];
-
-    return  (1.0 - s) * (1.0 - t) * c00 +
-                    s * (1.0 - t) * c10 +
-            (1.0 - s) *         t * c01 +
-                    s *         t * c11;
-}
-
-fn is_fluid_cell(i: u32, j: u32) -> bool {
-    return obstacles[idx_center(i, j)] == 0u;
-}
-
-fn is_obstacle(i: u32, j: u32) -> bool {
-    return obstacles[idx_center(i, j)] == 1u;
-}
-
-fn is_outflow(i: u32, j: u32) -> bool {
-    return obstacles[idx_center(i, j)] == 2u;
-}
-
-
 
 @compute @workgroup_size(16, 16)
-fn add_sources_main(
+fn density_add_sources_main(
     @builtin(global_invocation_id) global_id : vec3u,
     @builtin(workgroup_id) workgroup_id : vec3u,
     @builtin(local_invocation_id) local_id : vec3u,
@@ -183,103 +117,89 @@ fn add_sources_main(
         return;
     }
 
-    // add dye sources
     let idx = idx_center(i, j);
-    if dye_sources[idx] > 0.0 {
-        dye[idx] = dye_sources[idx];
+    density[idx] += float_metadata.delta_time * density_sources[idx];
+}
+
+
+@compute @workgroup_size(16, 16)
+fn density_diffuse_main(
+    @builtin(global_invocation_id) global_id : vec3u,
+    @builtin(workgroup_id) workgroup_id : vec3u,
+    @builtin(local_invocation_id) local_id : vec3u,
+) {
+    let i = global_id.x;
+    let j = global_id.y;
+
+    // don't process edge cells
+    if (i == 0u || j == 0u || i >= uint_metadata.width - 1u || j >= uint_metadata.height - 1u) {
+        return;
     }
+
+    let coeff = float_metadata.diffusion_rate * float_metadata.delta_time * float_metadata.cell_size * float_metadata.cell_size;
+    density_new[idx_center(i, j)] = (density[idx_center(i, j)] +
+        coeff * (density_new[idx_center(i + 1u, j)] +
+                 density_new[idx_center(i - 1u, j)] +
+                 density_new[idx_center(i, j + 1u)] +
+                 density_new[idx_center(i, j - 1u)])
+        ) / (1.0 + 4.0 * coeff);
+}
+
+
+@compute @workgroup_size(16, 16)
+fn density_advect_main(
+    @builtin(global_invocation_id) global_id : vec3u,
+    @builtin(workgroup_id) workgroup_id : vec3u,
+    @builtin(local_invocation_id) local_id : vec3u,
+) {
+    let i = global_id.x;
+    let j = global_id.y;
+
+    // don't process edge cells
+    if (i == 0u || j == 0u || i >= uint_metadata.width - 1u || j >= uint_metadata.height - 1u) {
+        return;
+    }
+
+    // check this here?
+    let dt0 = float_metadata.delta_time / float_metadata.cell_size;
+
+    let idx = idx_center(i, j);
+
+    var x = f32(i) - dt0 * u[idx];
+    var y = f32(j) - dt0 * v[idx];
+
+    // don't sample border cells
+    x = clamp(x, 0.5, f32(uint_metadata.width) - 1.5);
+    y = clamp(y, 0.5, f32(uint_metadata.height) - 1.5);
+
+    density_new[idx] = sample_density(x, y);
+}
+
+
+
+@compute @workgroup_size(16, 16)
+fn velocity_add_sources_main(
+    @builtin(global_invocation_id) global_id : vec3u,
+    @builtin(workgroup_id) workgroup_id : vec3u,
+    @builtin(local_invocation_id) local_id : vec3u,
+) {
+    let i = global_id.x;
+    let j = global_id.y;
+
+    if (i >= uint_metadata.width || j >= uint_metadata.height) {
+        return;
+    }
+
+    let idx = idx_center(i, j);
 
     // add velocity sources
-    // u velocity
-    if (i < uint_metadata.width + 1u) {
-        let u_idx = idx_u(i, j);
-        let u_vel = u_sources[u_idx];
-        if (u_vel != 0.0) {
-            u[u_idx] = u_sources[u_idx];
-        }
-    }
-
-    // v velocity
-    if (j < uint_metadata.height + 1u) {
-        let v_idx = idx_v(i, j);
-        let v_vel = v_sources[v_idx];
-        if (v_vel != 0.0) {
-            v[v_idx] = v_sources[v_idx];
-        }
-    }
-}
-
-
-
-@compute @workgroup_size(16, 16)
-fn advect_main(
-    @builtin(global_invocation_id) global_id : vec3u,
-    @builtin(workgroup_id) workgroup_id : vec3u,
-    @builtin(local_invocation_id) local_id : vec3u,
-) {
-    // use backwards semi-lagrangian advection
-    
-    // this assumes cell_size = 1.0 for simplicity
-    let i = global_id.x;
-    let j = global_id.y;
-
-    if (i >= uint_metadata.width || j >= uint_metadata.height) {
-        return;
-    }
-
-    // advect u
-    // first get velocity at the u location
-    {
-        let x = f32(i);
-        let y = f32(j) + 0.5;
-        if (x > 0.0 && x < f32(uint_metadata.width) && y > 0.0 && y < f32(uint_metadata.height)) {
-            let vel_x = u[idx_u(i, j)];
-            let vel_y = sample_v(x, y);
-
-            let x_prev = x - float_metadata.delta_time * vel_x;
-            let y_prev = y - float_metadata.delta_time * vel_y;
-
-            u_new[idx_u(i, j)] = sample_u(x_prev, y_prev);
-        }
-    }
-
-
-    // advect v
-    // first get velocity at the v location
-    {
-        let x = f32(i) + 0.5;
-        let y = f32(j);
-        if (x > 0.0 && x < f32(uint_metadata.width) && y > 0.0 && y < f32(uint_metadata.height)) {
-            let vel_x = sample_u(x, y);
-            let vel_y = v[idx_v(i, j)];
-
-            let x_prev = x - float_metadata.delta_time * vel_x;
-            let y_prev = y - float_metadata.delta_time * vel_y;
-
-            v_new[idx_v(i, j)] = sample_v(x_prev, y_prev);
-        }
-    }
-
-    // advect dye
-    // first get velocity at the cell center
-    {
-        let x = f32(i) + 0.5;
-        let y = f32(j) + 0.5;
-        if (x > 0.0 && x < f32(uint_metadata.width) && y > 0.0 && y < f32(uint_metadata.height)) {
-            let vel_x = sample_u(x, y);
-            let vel_y = sample_v(x, y);
-
-            let x_prev = x - float_metadata.delta_time * vel_x;
-            let y_prev = y - float_metadata.delta_time * vel_y;
-
-            dye_new[idx_center(i, j)] = sample_dye(x_prev, y_prev);
-        }
-    }
+    u[idx] += float_metadata.delta_time * u_sources[idx];
+    v[idx] += float_metadata.delta_time * v_sources[idx];
 }
 
 
 @compute @workgroup_size(16, 16)
-fn outflow_main(
+fn velocity_diffuse_main(
     @builtin(global_invocation_id) global_id : vec3u,
     @builtin(workgroup_id) workgroup_id : vec3u,
     @builtin(local_invocation_id) local_id : vec3u,
@@ -287,43 +207,189 @@ fn outflow_main(
     let i = global_id.x;
     let j = global_id.y;
 
-    if (i >= uint_metadata.width || j >= uint_metadata.height) {
+    // don't process edge cells
+    if (i == 0u || j == 0u || i >= uint_metadata.width - 1u || j >= uint_metadata.height - 1u) {
         return;
     }
-    if (!is_outflow(i, j)) {
-        return;
-    }
 
-    // outflow for u
-    if (i == 0u) {
-        // left edge
-        u[idx_u(i, j)] = u[idx_u(i + 1u, j)];
-    } else if (i == uint_metadata.width-1) {
-        // right edge
-        u[idx_u(i + 1u, j)] = u[idx_u(i, j)];
-    }
+    let coeff = float_metadata.viscosity * float_metadata.delta_time * float_metadata.cell_size * float_metadata.cell_size;
 
-    // outflow for v
-    if (j == 0u) {
-        // bottom edge
-        v[idx_v(i, j)] = v[idx_v(i, j + 1u)];
-    } else if (j == uint_metadata.height-1) {
-        // top edge
-        v[idx_v(i, j + 1u)] = v[idx_v(i, j)];
-    }
+    // diffuse u
+    u_new[idx_center(i, j)] = (u[idx_center(i, j)] +
+        coeff * (u_new[idx_center(i + 1u, j)] +
+                 u_new[idx_center(i - 1u, j)] +
+                 u_new[idx_center(i, j + 1u)] +
+                 u_new[idx_center(i, j - 1u)])
+        ) / (1.0 + 4.0 * coeff);
 
-    // outflow for dye
-    dye[idx_center(i, j)] = 0.0;
+    // diffuse v
+    v_new[idx_center(i, j)] = (v[idx_center(i, j)] +
+        coeff * (v_new[idx_center(i + 1u, j)] +
+                 v_new[idx_center(i - 1u, j)] +
+                 v_new[idx_center(i, j + 1u)] +
+                 v_new[idx_center(i, j - 1u)])
+        ) / (1.0 + 4.0 * coeff);
 }
 
-
 @compute @workgroup_size(16, 16)
-fn divergence_main(
+fn velocity_divergence_main(
     @builtin(global_invocation_id) global_id : vec3u,
     @builtin(workgroup_id) workgroup_id : vec3u,
     @builtin(local_invocation_id) local_id : vec3u,
 ) {
-    // this assumes cell_size = 1.0 for simplicity
+    let i = global_id.x;
+    let j = global_id.y;
+
+    // don't process edge cells
+    if (i == 0u || j == 0u || i >= uint_metadata.width - 1u || j >= uint_metadata.height - 1u) {
+        return;
+    }
+
+    let idx = idx_center(i, j);
+
+    let div = -0.5 * float_metadata.cell_size * (u[idx_center(i + 1u, j)] - u[idx_center(i - 1u, j)] +
+               v[idx_center(i, j + 1u)] - v[idx_center(i, j - 1u)]);
+
+    divergence[idx] = div;
+    pressure[idx] = 0.0;
+}
+
+
+@compute @workgroup_size(16, 16)
+fn velocity_pressure_solve_main(
+    @builtin(global_invocation_id) global_id : vec3u,
+    @builtin(workgroup_id) workgroup_id : vec3u,
+    @builtin(local_invocation_id) local_id : vec3u,
+) {
+    let i = global_id.x;
+    let j = global_id.y;
+
+    // don't process edge cells
+    if (i == 0u || j == 0u || i >= uint_metadata.width - 1u || j >= uint_metadata.height - 1u) {
+        return;
+    }
+
+    let idx = idx_center(i, j);
+    pressure[idx] = (divergence[idx] +
+        pressure[idx_center(i + 1u, j)] +
+        pressure[idx_center(i - 1u, j)] +
+        pressure[idx_center(i, j + 1u)] +
+        pressure[idx_center(i, j - 1u)])
+        / 4.0;
+
+}
+
+
+@compute @workgroup_size(16, 16)
+fn velocity_project_main(
+    @builtin(global_invocation_id) global_id : vec3u,
+    @builtin(workgroup_id) workgroup_id : vec3u,
+    @builtin(local_invocation_id) local_id : vec3u,
+) {
+    let i = global_id.x;
+    let j = global_id.y;
+
+    // don't process edge cells
+    if (i == 0u || j == 0u || i >= uint_metadata.width - 1u || j >= uint_metadata.height - 1u) {
+        return;
+    }
+
+    let idx = idx_center(i, j);
+    u[idx] -= 0.5 * (pressure[idx_center(i + 1u, j)] - pressure[idx_center(i - 1u, j)]) / float_metadata.cell_size;
+    v[idx] -= 0.5 * (pressure[idx_center(i, j + 1u)] - pressure[idx_center(i, j - 1u)]) / float_metadata.cell_size;
+}
+
+
+@compute @workgroup_size(16, 16)
+fn velocity_advect_main(
+    @builtin(global_invocation_id) global_id : vec3u,
+    @builtin(workgroup_id) workgroup_id : vec3u,
+    @builtin(local_invocation_id) local_id : vec3u,
+) {
+    let i = global_id.x;
+    let j = global_id.y;
+
+    // don't process edge cells
+    if (i == 0u || j == 0u || i >= uint_metadata.width - 1u || j >= uint_metadata.height - 1u) {
+        return;
+    }
+
+    // check this here?
+    let dt0 = float_metadata.delta_time / float_metadata.cell_size;
+
+    let idx = idx_center(i, j);
+
+    var x = f32(i) - dt0 * u[idx];
+    var y = f32(j) - dt0 * v[idx];
+
+    // don't sample border cells
+    x = clamp(x, 0.5, f32(uint_metadata.width) - 1.5);
+    y = clamp(y, 0.5, f32(uint_metadata.height) - 1.5);
+
+    u_new[idx] = sample_u(x, y);
+    v_new[idx] = sample_v(x, y);
+}
+
+
+@compute @workgroup_size(16, 16)
+fn set_boundary_main(
+    @builtin(global_invocation_id) global_id : vec3u,
+    @builtin(workgroup_id) workgroup_id : vec3u,
+    @builtin(local_invocation_id) local_id : vec3u,
+) {
+    let i = global_id.x;
+    let j = global_id.y;
+
+    // only process edge cells
+    if (i > 0u && j > 0u && i < uint_metadata.width - 1u && j < uint_metadata.height - 1u) {
+        return;
+    }
+
+    let idx = idx_center(i, j);
+
+    // scalars (density, pressure, divergence)
+    {
+        // copy from nearest interior cell
+        let ii = clamp(i, 1u, uint_metadata.width - 2u);
+        let jj = clamp(j, 1u, uint_metadata.height - 2u);
+        density[idx] = density[idx_center(ii, jj)];
+        density_new[idx] = density_new[idx_center(ii, jj)];
+        pressure[idx] = pressure[idx_center(ii, jj)];
+        divergence[idx] = divergence[idx_center(ii, jj)];
+    }
+
+    // velocity components (u, v)
+    {
+        // invert velocity component if on boundary
+        let ii = clamp(i, 1u, uint_metadata.width - 2u);
+        let jj = clamp(j, 1u, uint_metadata.height - 2u);
+
+        if (i == 0u || i == uint_metadata.width - 1u) {
+            u[idx] = -u[idx_center(ii, jj)];
+            u_new[idx] = -u_new[idx_center(ii, jj)];
+        } else {
+            u[idx] = u[idx_center(ii, jj)];
+            u_new[idx] = u_new[idx_center(ii, jj)];
+        }
+
+        if (j == 0u || j == uint_metadata.height - 1u) {
+            v[idx] = -v[idx_center(ii, jj)];
+            v_new[idx] = -v_new[idx_center(ii, jj)];
+        } else {
+            v[idx] = v[idx_center(ii, jj)];
+            v_new[idx] = v_new[idx_center(ii, jj)];
+        }
+    }
+}
+
+
+// swap helpers
+@compute @workgroup_size(16, 16)
+fn swap_velocity_main(
+    @builtin(global_invocation_id) global_id : vec3u,
+    @builtin(workgroup_id) workgroup_id : vec3u,
+    @builtin(local_invocation_id) local_id : vec3u,
+) {
     let i = global_id.x;
     let j = global_id.y;
 
@@ -332,48 +398,21 @@ fn divergence_main(
     }
 
     let idx = idx_center(i, j);
-    if (is_obstacle(i, j) || is_outflow(i, j)) {
-        divergence[idx] = 0.0;
-        return;
-    }
+    let temp_u = u[idx];
+    u[idx] = u_new[idx];
+    u_new[idx] = temp_u;
 
-    var u_right = 0.0;
-    var u_left = 0.0;
-    var v_top = 0.0;
-    var v_bottom = 0.0;
-
-    if (i < uint_metadata.width && (i == uint_metadata.width-1 || !is_obstacle(i + 1u, j))) {
-        u_right = u[idx_u(i + 1u, j)];
-    }
-    if (i >= 0u && (i == 0u || !is_obstacle(i - 1u, j))) {
-        u_left = u[idx_u(i, j)];
-    }
-    if (j < uint_metadata.height && (j == uint_metadata.height-1 || !is_obstacle(i, j + 1u))) {
-        v_top = v[idx_v(i, j + 1u)];
-    }
-    if (j >= 0u && (j == 0u || !is_obstacle(i, j - 1u))) {
-        v_bottom = v[idx_v(i, j)];
-    }
-
-    // let u_right = u[idx_u(i + 1u, j)];
-    // let u_left = u[idx_u(i, j)];
-    // let v_top = v[idx_v(i, j + 1u)];
-    // let v_bottom = v[idx_v(i, j)];
-
-    // TODO: might need to normalize (divide) by cell size here
-    let div = (u_right - u_left) + (v_top - v_bottom);
-    divergence[idx_center(i, j)] = div;
+    let temp_v = v[idx];
+    v[idx] = v_new[idx];
+    v_new[idx] = temp_v;
 }
 
-
-
 @compute @workgroup_size(16, 16)
-fn pressure_solve_main(
+fn swap_density_main(
     @builtin(global_invocation_id) global_id : vec3u,
     @builtin(workgroup_id) workgroup_id : vec3u,
     @builtin(local_invocation_id) local_id : vec3u,
 ) {
-    // this assumes cell_size = 1.0 for simplicity
     let i = global_id.x;
     let j = global_id.y;
 
@@ -382,116 +421,7 @@ fn pressure_solve_main(
     }
 
     let idx = idx_center(i, j);
-    if (is_obstacle(i, j)) {
-        new_pressure[idx] = 0.0;
-        return;
-    }
-
-    if (is_outflow(i, j)) {
-        if (i == 0u) {
-            new_pressure[idx] = pressure[idx_center(i + 1u, j)];
-        } else if (i == uint_metadata.width - 1u) {
-            new_pressure[idx] = pressure[idx_center(i - 1u, j)];
-        } else if (j == 0u) {
-            new_pressure[idx] = pressure[idx_center(i, j + 1u)];
-        } else if (j == uint_metadata.height - 1u) {
-            new_pressure[idx] = pressure[idx_center(i, j - 1u)];
-        }
-        return;
-    }
-
-    var num_neighbors = 0.0;
-    var sum_neighbors = 0.0;
-
-    if (i > 0u && !is_obstacle(i - 1u, j)) {
-        sum_neighbors = sum_neighbors + pressure[idx_center(i - 1u, j)];
-        num_neighbors = num_neighbors + 1.0;
-    }
-    if (i + 1u < uint_metadata.width && !is_obstacle(i + 1u, j)) {
-        sum_neighbors = sum_neighbors + pressure[idx_center(i + 1u, j)];
-        num_neighbors = num_neighbors + 1.0;
-    }
-    if (j > 0u && !is_obstacle(i, j - 1u)) {
-        sum_neighbors = sum_neighbors + pressure[idx_center(i, j - 1u)];
-        num_neighbors = num_neighbors + 1.0;
-    }
-    if (j + 1u < uint_metadata.height && !is_obstacle(i, j + 1u)) {
-        sum_neighbors = sum_neighbors + pressure[idx_center(i, j + 1u)];
-        num_neighbors = num_neighbors + 1.0;
-    }
-
-    let div = divergence[idx_center(i, j)];
-    // let new_p = (div + sum_neighbors) / num_neighbors;
-    let new_p = (sum_neighbors - div) / num_neighbors;
-
-    new_pressure[idx_center(i, j)] = new_p;
-}
-
-
-@compute @workgroup_size(16, 16)
-fn project_main(
-    @builtin(global_invocation_id) global_id : vec3u,
-    @builtin(workgroup_id) workgroup_id : vec3u,
-    @builtin(local_invocation_id) local_id : vec3u,
-) {
-    // this assumes cell_size = 1.0 for simplicity
-    let i = global_id.x;
-    let j = global_id.y;
-
-
-    // project u
-    // u is a grid of size (width + 1) x height
-    if (i > 0u && i < uint_metadata.width && j < uint_metadata.height) {
-        let idx_left = idx_center(i - 1u, j);
-        let idx_right = idx_center(i, j);
-
-        let solid_left = is_obstacle(i - 1u, j);
-        let solid_right = is_obstacle(i, j);
-
-        let face_idx = idx_u(i, j);
-
-        if (solid_left || solid_right) {
-            u_new[face_idx] = 0.0;
-            return;
-        } else {
-            let p_dif = pressure[idx_right] - pressure[idx_left];
-            u_new[face_idx] = u[face_idx] - p_dif;
-        }
-    }
-
-    // project v
-    // v is a grid of size width x (height + 1)
-    if (i < uint_metadata.width && j > 0u && j < uint_metadata.height) {
-        let idx_bottom = idx_center(i, j - 1u);
-        let idx_top = idx_center(i, j);
-
-        let solid_bottom = is_obstacle(i, j - 1u);
-        let solid_top = is_obstacle(i, j);
-
-        let face_idx = idx_v(i, j);
-
-        if (solid_bottom || solid_top) {
-            v_new[face_idx] = 0.0;
-            return;
-        } else {
-            let p_dif = pressure[idx_top] - pressure[idx_bottom];
-            v_new[face_idx] = v[face_idx] - p_dif;
-        }
-    }
-}
-
-
-@compute @workgroup_size(16, 16)
-fn cleanup_main(
-    @builtin(global_invocation_id) global_id : vec3u,
-    @builtin(workgroup_id) workgroup_id : vec3u,
-    @builtin(local_invocation_id) local_id : vec3u,
-) {
-    let i = global_id.x;
-    let j = global_id.y;
-
-    // swap dye and dye_new
-    if (i < uint_metadata.width && j < uint_metadata.height) {
-        dye_new[idx_center(i, j)] = dye[idx_center(i, j)];
-    }
+    let temp_density = density[idx];
+    density[idx] = density_new[idx];
+    density_new[idx] = temp_density;
 }

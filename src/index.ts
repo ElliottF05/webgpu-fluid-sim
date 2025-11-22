@@ -13,17 +13,19 @@ const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
 context.configure({ device, format: canvasFormat, alphaMode: "premultiplied" });
 
 // Canvas and data dimensions
-const dpr = window.devicePixelRatio || 1;
-const width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
-const height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+// const dpr = window.devicePixelRatio || 1;
+// const width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+// const height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+const width = canvas.width;
+const height = canvas.height;
 
 
 
 // ----- Initialize GPU buffers -----
 
 // 1) Metadata buffers
-const uintMetadata = new Uint32Array([width, height, 10]); // width, height, num_iters
-const floatMetadata = new Float32Array([0.016, 1.5]); // delta_time, over_relaxation
+const uintMetadata = new Uint32Array([width, height]); // width, height
+const floatMetadata = new Float32Array([0.016, 1.0, 0.0, 0.0]); // delta_time, cell_size, diffusion_rate, viscosity
 
 const uintMetadataBuffer = device.createBuffer({
   size: uintMetadata.byteLength,
@@ -39,39 +41,7 @@ device.queue.writeBuffer(floatMetadataBuffer, 0, floatMetadata.buffer, floatMeta
 
 
 // 2) Velocity buffers (u and v components)
-const uVelocity = new Float32Array((width + 1) * height).fill(0.0);
-const vVelocity = new Float32Array(width * (height + 1)).fill(0.0);
-
-const newUVelocity = new Float32Array((width + 1) * height).fill(0.0);
-const newVVelocity = new Float32Array(width * (height + 1)).fill(0.0);
-
-const uBuffer = device.createBuffer({
-  size: uVelocity.byteLength,
-  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-});
-device.queue.writeBuffer(uBuffer, 0, uVelocity.buffer, uVelocity.byteOffset, uVelocity.byteLength);
-
-const vBuffer = device.createBuffer({
-  size: vVelocity.byteLength,
-  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-});
-device.queue.writeBuffer(vBuffer, 0, vVelocity.buffer, vVelocity.byteOffset, vVelocity.byteLength);
-
-const newUBuffer = device.createBuffer({
-  size: newUVelocity.byteLength,
-  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-});
-device.queue.writeBuffer(newUBuffer, 0, newUVelocity.buffer, newUVelocity.byteOffset, newUVelocity.byteLength);
-
-const newVBuffer = device.createBuffer({
-  size: newVVelocity.byteLength,
-  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-});
-device.queue.writeBuffer(newVBuffer, 0, newVVelocity.buffer, newVVelocity.byteOffset, newVVelocity.byteLength);
-
-
-// 3) Cell center buffers
-function createCellCenterBuffer(initialData: Float32Array): GPUBuffer {
+function createBuffer(initialData: Uint32Array | Float32Array): GPUBuffer {
   const buffer = device.createBuffer({
     size: initialData.byteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
@@ -80,129 +50,215 @@ function createCellCenterBuffer(initialData: Float32Array): GPUBuffer {
   return buffer;
 }
 
-const dye = new Float32Array(width * height).fill(0.0);
-const newDye = new Float32Array(width * height).fill(0.0);
+const uVelocity = new Float32Array(width * height).fill(0.0);
+const vVelocity = new Float32Array(width * height).fill(0.0);
 
-// TEMP: initialize a checkerboard dye pattern
-// const checkerSize = 24;
-// for (let y = 0; y < height; ++y) {
-//   for (let x = 0; x < width; ++x) {
-//     const checkerX = Math.floor(x / checkerSize);
-//     const checkerY = Math.floor(y / checkerSize);
-//     if ((checkerX + checkerY) % 2 === 0) {
-//       dye[y * width + x] = 0.2;
-//     }
-//   }
-// }
+const newUVelocity = new Float32Array(width * height).fill(0.0);
+const newVVelocity = new Float32Array(width * height).fill(0.0);
 
-const dyeBuffer = createCellCenterBuffer(dye);
-const newDyeBuffer = createCellCenterBuffer(newDye);
+const uBuffer = createBuffer(uVelocity);
+const vBuffer = createBuffer(vVelocity);
+const newUBuffer = createBuffer(newUVelocity);
+const newVBuffer = createBuffer(newVVelocity);
 
-const pressure = new Float32Array(width * height).fill(0.0);
-const newPressure = new Float32Array(width * height).fill(0.0);
-const pressureBuffer = createCellCenterBuffer(pressure);
-const newPressureBuffer = createCellCenterBuffer(newPressure);
 
+// 3) Density buffers
+const density = new Float32Array(width * height).fill(0.0);
+const newDensity = new Float32Array(width * height).fill(0.0);
+
+const densityBuffer = createBuffer(density);
+const newDensityBuffer = createBuffer(newDensity);
+
+
+// 4) Divergence and pressure buffers
 const divergence = new Float32Array(width * height).fill(0.0);
-const divergenceBuffer = createCellCenterBuffer(divergence);
+const pressure = new Float32Array(width * height).fill(0.0);
 
-const obstacles = new Uint32Array(width * height).fill(0);
-// set borders as obstacles
-// for (let y = 0; y < height; ++y) {
-//   obstacles[y * width + 0] = 1;
-//   obstacles[y * width + (width - 1)] = 1;
-// }
-// for (let x = 0; x < width; ++x) {
-//   obstacles[0 * width + x] = 1;
-//   obstacles[(height - 1) * width + x] = 1;
-// }
-// add a central square obstacle
-const obstacleSize = 20;
-const startX = Math.floor((width - obstacleSize) / 2);
-const startY = Math.floor((height - obstacleSize) / 2);
-for (let y = startY; y < startY + obstacleSize; ++y) {
-  for (let x = startX; x < startX + obstacleSize; ++x) {
-    obstacles[y * width + x] = 1;
-  }
-}
+const divergenceBuffer = createBuffer(divergence);
+const pressureBuffer = createBuffer(pressure);
 
-// mark right edge as outflow
-for (let y = 0; y < height; ++y) {
-  obstacles[y * width + (width - 1)] = 2;
-}
 
-const obstaclesBuffer = device.createBuffer({
-  size: obstacles.byteLength,
-  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-});
-device.queue.writeBuffer(obstaclesBuffer, 0, obstacles.buffer, obstacles.byteOffset, obstacles.byteLength);
+// 5) Sources buffers
+const densitySources = new Float32Array(width * height).fill(0.0);
+const uSources = new Float32Array(width * height).fill(0.0);
+const vSources = new Float32Array(width * height).fill(0.0);
 
-const dyeSources = new Float32Array(width * height).fill(0.0);
-// make entire left side a dye source
-const leftSourceX = 2;
-for (let y = 0; y < height; ++y) {
-  dyeSources[y * width + leftSourceX] = 1.0;
-}
-const dyeSourcesBuffer = createCellCenterBuffer(dyeSources);
-
-const uSources = new Float32Array((width + 1) * height).fill(0.0);
-const vSources = new Float32Array(width * (height + 1)).fill(0.0);
-// make entire left side a u velocity source
-for (let y = 0; y < height; ++y) {
-  for (let x = width-5; x <= width-2; ++x) {
-    uSources[y * (width + 1) + x] = 100.0;
-  }
-}
-const uSourcesBuffer = createCellCenterBuffer(uSources);
-const vSourcesBuffer = createCellCenterBuffer(vSources);
+const densitySourcesBuffer = createBuffer(densitySources);
+const uSourcesBuffer = createBuffer(uSources);
+const vSourcesBuffer = createBuffer(vSources);
 
 
 // ----- Create compute/graphics pipelines -----
 const computeShaderModule = device.createShaderModule({ code: computeShaderCode });
 const renderShaderModule = device.createShaderModule({ code: renderShaderCode });
 
-// Add sources pipeline
-const sourcesPipeline = device.createComputePipeline({
+// // metadata buffers
+// @group(0) @binding(0) var<uniform> float_metadata: FloatMetadata;
+// @group(0) @binding(1) var<uniform> uint_metadata: UintMetadata;
+
+// // velocity fields
+// @group(0) @binding(2) var<storage, read_write> u: array<f32>;
+// @group(0) @binding(3) var<storage, read_write> v: array<f32>;
+// @group(0) @binding(4) var<storage, read_write> u_new: array<f32>;
+// @group(0) @binding(5) var<storage, read_write> v_new: array<f32>;
+
+// // density field
+// @group(0) @binding(6) var<storage, read_write> density: array<f32>;
+// @group(0) @binding(7) var<storage, read_write> density_new: array<f32>;
+
+// // divergence and pressure
+// @group(0) @binding(8) var<storage, read_write> divergence: array<f32>;
+// @group(0) @binding(9) var<storage, read_write> pressure: array<f32>;
+
+// // density sources field
+// @group(0) @binding(10) var<storage, read> density_sources: array<f32>;
+
+// // velocity sources field
+// @group(0) @binding(11) var<storage, read> u_sources: array<f32>;
+// @group(0) @binding(12) var<storage, read> v_sources: array<f32>;
+
+
+const densityAddSourcesPipeline = device.createComputePipeline({
   layout: "auto",
   compute: {
     module: computeShaderModule,
-    entryPoint: "add_sources_main",
+    entryPoint: "density_add_sources_main",
   },
 });
 
-const sourcesBindGroup = device.createBindGroup({
-  layout: sourcesPipeline.getBindGroupLayout(0),
+const densityAddSourcesBindGroup = device.createBindGroup({
+  layout: densityAddSourcesPipeline.getBindGroupLayout(0),
   entries: [
-    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    // { binding: 2, resource: { buffer: uBuffer } },
+    // { binding: 3, resource: { buffer: vBuffer } },
+    // { binding: 4, resource: { buffer: newUBuffer } },
+    // { binding: 5, resource: { buffer: newVBuffer } },
+    { binding: 6, resource: { buffer: densityBuffer } },
+    // { binding: 7, resource: { buffer: newDensityBuffer } },
+    // { binding: 8, resource: { buffer: divergenceBuffer } },
+    // { binding: 9, resource: { buffer: pressureBuffer } },
+    { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: uSourcesBuffer } },
+    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+  ],
+});
+
+
+const densityDiffusePipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "density_diffuse_main",
+  },
+});
+
+const densityDiffuseBindGroupA = device.createBindGroup({
+  layout: densityDiffusePipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    // { binding: 2, resource: { buffer: uBuffer } },
+    // { binding: 3, resource: { buffer: vBuffer } },
+    // { binding: 4, resource: { buffer: newUBuffer } },
+    // { binding: 5, resource: { buffer: newVBuffer } },
+    { binding: 6, resource: { buffer: densityBuffer } },
+    { binding: 7, resource: { buffer: newDensityBuffer } },
+    // { binding: 8, resource: { buffer: divergenceBuffer } },
+    // { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: uSourcesBuffer } },
+    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+  ],
+});
+
+const densityDiffuseBindGroupB = device.createBindGroup({
+  layout: densityDiffusePipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    // { binding: 2, resource: { buffer: uBuffer } },
+    // { binding: 3, resource: { buffer: vBuffer } },
+    // { binding: 4, resource: { buffer: newUBuffer } },
+    // { binding: 5, resource: { buffer: newVBuffer } },
+    { binding: 6, resource: { buffer: newDensityBuffer } },
+    { binding: 7, resource: { buffer: densityBuffer } },
+    // { binding: 8, resource: { buffer: divergenceBuffer } },
+    // { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: uSourcesBuffer } },
+    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+  ],
+});
+
+
+const densityAdvectPipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "density_advect_main",
+  },
+});
+
+const densityAdvectBindGroup = device.createBindGroup({
+  layout: densityAdvectPipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: floatMetadataBuffer } },
     { binding: 1, resource: { buffer: uintMetadataBuffer } },
     { binding: 2, resource: { buffer: uBuffer } },
     { binding: 3, resource: { buffer: vBuffer } },
     // { binding: 4, resource: { buffer: newUBuffer } },
     // { binding: 5, resource: { buffer: newVBuffer } },
-    // { binding: 6, resource: { buffer: pressureBuffer } },
-    // { binding: 7, resource: { buffer: newPressureBuffer } },
+    { binding: 6, resource: { buffer: densityBuffer } },
+    { binding: 7, resource: { buffer: newDensityBuffer } },
     // { binding: 8, resource: { buffer: divergenceBuffer } },
-    // { binding: 9, resource: { buffer: obstaclesBuffer } },
-    { binding: 10, resource: { buffer: dyeBuffer } },
-    // { binding: 11, resource: { buffer: newDyeBuffer } },
-    { binding: 12, resource: { buffer: dyeSourcesBuffer } },
-    { binding: 13, resource: { buffer: uSourcesBuffer } },
-    { binding: 14, resource: { buffer: vSourcesBuffer } },
+    // { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: uSourcesBuffer } },
+    // { binding: 12, resource: { buffer: vSourcesBuffer } },
   ],
 });
 
-// Advection pipeline
-const advectionPipeline = device.createComputePipeline({
+
+const velocityAddSourcesPipeline = device.createComputePipeline({
   layout: "auto",
   compute: {
     module: computeShaderModule,
-    entryPoint: "advect_main",
+    entryPoint: "velocity_add_sources_main",
   },
 });
 
+const velocityAddSourcesBindGroup = device.createBindGroup({
+  layout: velocityAddSourcesPipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    { binding: 2, resource: { buffer: uBuffer } },
+    { binding: 3, resource: { buffer: vBuffer } },
+    // { binding: 4, resource: { buffer: newUBuffer } },
+    // { binding: 5, resource: { buffer: newVBuffer } },
+    // { binding: 6, resource: { buffer: densityBuffer } },
+    // { binding: 7, resource: { buffer: newDensityBuffer } },
+    // { binding: 8, resource: { buffer: divergenceBuffer } },
+    // { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    { binding: 11, resource: { buffer: uSourcesBuffer } },
+    { binding: 12, resource: { buffer: vSourcesBuffer } },
+  ],
+});
 
-const advectionBindGroup = device.createBindGroup({
-  layout: advectionPipeline.getBindGroupLayout(0),
+
+const velocityDiffusePipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "velocity_diffuse_main",
+  },
+});
+
+const velocityDiffuseBindGroupA = device.createBindGroup({
+  layout: velocityDiffusePipeline.getBindGroupLayout(0),
   entries: [
     { binding: 0, resource: { buffer: floatMetadataBuffer } },
     { binding: 1, resource: { buffer: uintMetadataBuffer } },
@@ -210,192 +266,229 @@ const advectionBindGroup = device.createBindGroup({
     { binding: 3, resource: { buffer: vBuffer } },
     { binding: 4, resource: { buffer: newUBuffer } },
     { binding: 5, resource: { buffer: newVBuffer } },
-    // { binding: 6, resource: { buffer: pressureBuffer } },
-    // { binding: 7, resource: { buffer: newPressureBuffer } },
+    // { binding: 6, resource: { buffer: densityBuffer } },
+    // { binding: 7, resource: { buffer: newDensityBuffer } },
     // { binding: 8, resource: { buffer: divergenceBuffer } },
-    // { binding: 9, resource: { buffer: obstaclesBuffer } },
-    { binding: 10, resource: { buffer: dyeBuffer } },
-    { binding: 11, resource: { buffer: newDyeBuffer } },
-    // { binding: 12, resource: { buffer: dyeSourcesBuffer } },
-    // { binding: 13, resource: { buffer: uSourcesBuffer } },
-    // { binding: 14, resource: { buffer: vSourcesBuffer } },
+    // { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: uSourcesBuffer } },
+    // { binding: 12, resource: { buffer: vSourcesBuffer } },
   ],
 });
 
-
-// Divergence pipeline
-const divergencePipeline = device.createComputePipeline({
-  layout: "auto",
-  compute: {
-    module: computeShaderModule,
-    entryPoint: "divergence_main",
-  },
-});
-
-const divergenceBindGroup = device.createBindGroup({
-  layout: divergencePipeline.getBindGroupLayout(0),
+const velocityDiffuseBindGroupB = device.createBindGroup({
+  layout: velocityDiffusePipeline.getBindGroupLayout(0),
   entries: [
-    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
-    { binding: 1, resource: { buffer: uintMetadataBuffer } },
-    { binding: 2, resource: { buffer: newUBuffer } },
-    { binding: 3, resource: { buffer: newVBuffer } },
-    // { binding: 4, resource: { buffer: newUBuffer } },
-    // { binding: 5, resource: { buffer: newVBuffer } },
-    // { binding: 6, resource: { buffer: newPressureBuffer } },
-    // { binding: 7, resource: { buffer: pressureBuffer } },
-    { binding: 8, resource: { buffer: divergenceBuffer } },
-    { binding: 9, resource: { buffer: obstaclesBuffer } },
-    // { binding: 10, resource: { buffer: newDyeBuffer } },
-    // { binding: 11, resource: { buffer: dyeBuffer } },
-    // { binding: 12, resource: { buffer: dyeSourcesBuffer } },
-    // { binding: 13, resource: { buffer: uSourcesBuffer } },
-    // { binding: 14, resource: { buffer: vSourcesBuffer } },
-  ],
-});
-
-
-// Pressure solve pipeline
-const pressureSolvePipeline = device.createComputePipeline({
-  layout: "auto",
-  compute: {
-    module: computeShaderModule,
-    entryPoint: "pressure_solve_main",
-  },
-});
-
-const pressureSolveBindGroupA = device.createBindGroup({
-  layout: pressureSolvePipeline.getBindGroupLayout(0),
-  entries: [
-    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
-    { binding: 1, resource: { buffer: uintMetadataBuffer } },
-    // { binding: 2, resource: { buffer: uBuffer } },
-    // { binding: 3, resource: { buffer: vBuffer } },
-    // { binding: 4, resource: { buffer: newUBuffer } },
-    // { binding: 5, resource: { buffer: newVBuffer } },
-    { binding: 6, resource: { buffer: pressureBuffer } },
-    { binding: 7, resource: { buffer: newPressureBuffer } },
-    { binding: 8, resource: { buffer: divergenceBuffer } },
-    { binding: 9, resource: { buffer: obstaclesBuffer } },
-    // { binding: 10, resource: { buffer: dyeBuffer } },
-    // { binding: 11, resource: { buffer: newDyeBuffer } },
-    // { binding: 12, resource: { buffer: dyeSourcesBuffer } },
-    // { binding: 13, resource: { buffer: uSourcesBuffer } },
-    // { binding: 14, resource: { buffer: vSourcesBuffer } },
-  ]
-});
-
-const pressureSolveBindGroupB = device.createBindGroup({
-  layout: pressureSolvePipeline.getBindGroupLayout(0),
-  entries: [
-    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
-    { binding: 1, resource: { buffer: uintMetadataBuffer } },
-    // { binding: 2, resource: { buffer: uBuffer } },
-    // { binding: 3, resource: { buffer: vBuffer } },
-    // { binding: 4, resource: { buffer: newUBuffer } },
-    // { binding: 5, resource: { buffer: newVBuffer } },
-    { binding: 6, resource: { buffer: newPressureBuffer } },
-    { binding: 7, resource: { buffer: pressureBuffer } },
-    { binding: 8, resource: { buffer: divergenceBuffer } },
-    { binding: 9, resource: { buffer: obstaclesBuffer } },
-    // { binding: 10, resource: { buffer: dyeBuffer } },
-    // { binding: 11, resource: { buffer: newDyeBuffer } },
-    // { binding: 12, resource: { buffer: dyeSourcesBuffer } },
-    // { binding: 13, resource: { buffer: uSourcesBuffer } },
-    // { binding: 14, resource: { buffer: vSourcesBuffer } },
-  ]
-});
-
-
-// Projection pipeline
-const projectionPipeline = device.createComputePipeline({
-  layout: "auto",
-  compute: {
-    module: computeShaderModule,
-    entryPoint: "project_main",
-  },
-});
-
-const projectionBindGroup = device.createBindGroup({
-  layout: projectionPipeline.getBindGroupLayout(0),
-  entries: [
-    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 0, resource: { buffer: floatMetadataBuffer } },
     { binding: 1, resource: { buffer: uintMetadataBuffer } },
     { binding: 2, resource: { buffer: newUBuffer } },
     { binding: 3, resource: { buffer: newVBuffer } },
     { binding: 4, resource: { buffer: uBuffer } },
     { binding: 5, resource: { buffer: vBuffer } },
-    { binding: 6, resource: { buffer: pressureBuffer } },
-    // { binding: 7, resource: { buffer: newPressureBuffer } },
+    // { binding: 6, resource: { buffer: densityBuffer } },
+    // { binding: 7, resource: { buffer: newDensityBuffer } },
     // { binding: 8, resource: { buffer: divergenceBuffer } },
-    { binding: 9, resource: { buffer: obstaclesBuffer } },
-    // { binding: 10, resource: { buffer: dyeBuffer } },
-    // { binding: 11, resource: { buffer: newDyeBuffer } },
-    // { binding: 12, resource: { buffer: dyeSourcesBuffer } },
-    // { binding: 13, resource: { buffer: uSourcesBuffer } },
-    // { binding: 14, resource: { buffer: vSourcesBuffer } },
-  ]
-});
-
-
-// Outlfow pipeline
-const outflowPipeline = device.createComputePipeline({
-  layout: "auto",
-  compute: {
-    module: computeShaderModule,
-    entryPoint: "outflow_main",
-  },
-});
-
-const outflowBindGroup = device.createBindGroup({
-  layout: outflowPipeline.getBindGroupLayout(0),
-  entries: [
-    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
-    { binding: 1, resource: { buffer: uintMetadataBuffer } },
-    { binding: 2, resource: { buffer: newUBuffer } },
-    { binding: 3, resource: { buffer: newVBuffer } },
-    // { binding: 4, resource: { buffer: uBuffer } },
-    // { binding: 5, resource: { buffer: vBuffer } },
-    // { binding: 6, resource: { buffer: pressureBuffer } },
-    // { binding: 7, resource: { buffer: newPressureBuffer } },
-    // { binding: 8, resource: { buffer: divergenceBuffer } },
-    { binding: 9, resource: { buffer: obstaclesBuffer } },
-    { binding: 10, resource: { buffer: newDyeBuffer } },
-    // { binding: 11, resource: { buffer: newDyeBuffer } },
-    // { binding: 12, resource: { buffer: dyeSourcesBuffer } },
-    // { binding: 13, resource: { buffer: uSourcesBuffer } },
-    // { binding: 14, resource: { buffer: vSourcesBuffer } },
+    // { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: uSourcesBuffer } },
+    // { binding: 12, resource: { buffer: vSourcesBuffer } },
   ],
 });
 
 
-// Cleanup pipeline
-const cleanupPipeline = device.createComputePipeline({
+const velocityDivergencePipeline = device.createComputePipeline({
   layout: "auto",
   compute: {
     module: computeShaderModule,
-    entryPoint: "cleanup_main",
+    entryPoint: "velocity_divergence_main",
   },
 });
 
-const cleanupBindGroup = device.createBindGroup({
-  layout: cleanupPipeline.getBindGroupLayout(0),
+const velocityDivergenceBindGroup = device.createBindGroup({
+  layout: velocityDivergencePipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    { binding: 2, resource: { buffer: uBuffer } },
+    { binding: 3, resource: { buffer: vBuffer } },
+    // { binding: 4, resource: { buffer: newUBuffer } },
+    // { binding: 5, resource: { buffer: newVBuffer } },
+    // { binding: 6, resource: { buffer: densityBuffer } },
+    // { binding: 7, resource: { buffer: newDensityBuffer } },
+    { binding: 8, resource: { buffer: divergenceBuffer } },
+    { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: uSourcesBuffer } },
+    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+  ],
+});
+
+
+const velocityPressureSolvePipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "velocity_pressure_solve_main",
+  },
+});
+
+const velocityPressureSolveBindGroup = device.createBindGroup({
+  layout: velocityPressureSolvePipeline.getBindGroupLayout(0),
   entries: [
     // { binding: 0, resource: { buffer: floatMetadataBuffer } },
     { binding: 1, resource: { buffer: uintMetadataBuffer } },
-    // { binding: 2, resource: { buffer: newUBuffer } },
-    // { binding: 3, resource: { buffer: newVBuffer } },
-    // { binding: 4, resource: { buffer: uBuffer } },
-    // { binding: 5, resource: { buffer: vBuffer } },
-    // { binding: 6, resource: { buffer: pressureBuffer } },
-    // { binding: 7, resource: { buffer: newPressureBuffer } },
+    // { binding: 2, resource: { buffer: uBuffer } },
+    // { binding: 3, resource: { buffer: vBuffer } },
+    // { binding: 4, resource: { buffer: newUBuffer } },
+    // { binding: 5, resource: { buffer: newVBuffer } },
+    // { binding: 6, resource: { buffer: densityBuffer } },
+    // { binding: 7, resource: { buffer: newDensityBuffer } },
+    { binding: 8, resource: { buffer: divergenceBuffer } },
+    { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: uSourcesBuffer } },
+    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+  ],
+});
+
+
+const velocityProjectPipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "velocity_project_main",
+  },
+});
+
+const velocityProjectBindGroup = device.createBindGroup({
+  layout: velocityProjectPipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    { binding: 2, resource: { buffer: uBuffer } },
+    { binding: 3, resource: { buffer: vBuffer } },
+    // { binding: 4, resource: { buffer: newUBuffer } },
+    // { binding: 5, resource: { buffer: newVBuffer } },
+    // { binding: 6, resource: { buffer: densityBuffer } },
+    // { binding: 7, resource: { buffer: newDensityBuffer } },
     // { binding: 8, resource: { buffer: divergenceBuffer } },
-    // { binding: 9, resource: { buffer: obstaclesBuffer } },
-    { binding: 10, resource: { buffer: newDyeBuffer } },
-    { binding: 11, resource: { buffer: dyeBuffer } },
-    // { binding: 12, resource: { buffer: dyeSourcesBuffer } },
-    // { binding: 13, resource: { buffer: uSourcesBuffer } },
-    // { binding: 14, resource: { buffer: vSourcesBuffer } },
-  ]
+    { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: uSourcesBuffer } },
+    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+  ],
+});
+
+
+const velocityAdvectPipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "velocity_advect_main",
+  },
+});
+
+const velocityAdvectBindGroup = device.createBindGroup({
+  layout: velocityAdvectPipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    { binding: 2, resource: { buffer: uBuffer } },
+    { binding: 3, resource: { buffer: vBuffer } },
+    { binding: 4, resource: { buffer: newUBuffer } },
+    { binding: 5, resource: { buffer: newVBuffer } },
+    // { binding: 6, resource: { buffer: densityBuffer } },
+    // { binding: 7, resource: { buffer: newDensityBuffer } },
+    // { binding: 8, resource: { buffer: divergenceBuffer } },
+    // { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: uSourcesBuffer } },
+    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+  ],
+});
+
+
+const setBoundaryPipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "set_boundary_main",
+  },
+});
+
+const setBoundaryBindGroup = device.createBindGroup({
+  layout: setBoundaryPipeline.getBindGroupLayout(0),
+  entries: [
+    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    { binding: 2, resource: { buffer: uBuffer } },
+    { binding: 3, resource: { buffer: vBuffer } },
+    { binding: 4, resource: { buffer: newUBuffer } },
+    { binding: 5, resource: { buffer: newVBuffer } },
+    { binding: 6, resource: { buffer: densityBuffer } },
+    { binding: 7, resource: { buffer: newDensityBuffer } },
+    { binding: 8, resource: { buffer: divergenceBuffer } },
+    { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: uSourcesBuffer } },
+    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+  ],
+});
+
+
+const swapDensityPipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "swap_density_main",
+  },
+});
+
+const swapDensityBindGroup = device.createBindGroup({
+  layout: swapDensityPipeline.getBindGroupLayout(0),
+  entries: [
+    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    // { binding: 2, resource: { buffer: uBuffer } },
+    // { binding: 3, resource: { buffer: vBuffer } },
+    // { binding: 4, resource: { buffer: newUBuffer } },
+    // { binding: 5, resource: { buffer: newVBuffer } },
+    { binding: 6, resource: { buffer: densityBuffer } },
+    { binding: 7, resource: { buffer: newDensityBuffer } },
+    // { binding: 8, resource: { buffer: divergenceBuffer } },
+    // { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: uSourcesBuffer } },
+    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+  ],
+});
+
+
+const swapVelocityPipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "swap_velocity_main",
+  },
+});
+
+const swapVelocityBindGroup = device.createBindGroup({
+  layout: swapVelocityPipeline.getBindGroupLayout(0),
+  entries: [
+    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    { binding: 2, resource: { buffer: uBuffer } },
+    { binding: 3, resource: { buffer: vBuffer } },
+    { binding: 4, resource: { buffer: newUBuffer } },
+    { binding: 5, resource: { buffer: newVBuffer } },
+    // { binding: 6, resource: { buffer: densityBuffer } },
+    // { binding: 7, resource: { buffer: newDensityBuffer } },
+    // { binding: 8, resource: { buffer: divergenceBuffer } },
+    // { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: uSourcesBuffer } },
+    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+  ],
 });
 
 
@@ -420,21 +513,20 @@ const renderBindGroup = device.createBindGroup({
   layout: renderPipeline.getBindGroupLayout(0),
   entries: [
     { binding: 0, resource: { buffer: uintMetadataBuffer } },
-    { binding: 1, resource: { buffer: dyeBuffer } },
-    { binding: 2, resource: { buffer: obstaclesBuffer } },
+    { binding: 1, resource: { buffer: densityBuffer } },
   ],
 });
 
 
 
 // ----- Main simulation loop -----
-const numJacobiIterations = 200;
+const numJacobiIterations = 20;
 
 const workgroupX = 16;
 const workgroupY = 16;
 
-const dispatchX = Math.ceil((width + 1) / workgroupX);
-const dispatchY = Math.ceil((height + 1) / workgroupY);
+const dispatchX = Math.ceil(width / workgroupX);
+const dispatchY = Math.ceil(height / workgroupY);
 
 function frame() {
   const commandEncoder = device.createCommandEncoder();
@@ -443,46 +535,140 @@ function frame() {
   {
     const computePass = commandEncoder.beginComputePass();
 
-    // 0) Add sources
-    computePass.setPipeline(sourcesPipeline);
-    computePass.setBindGroup(0, sourcesBindGroup); // u, v, dye (in place)
+    // 1) Velocity step
+
+    // 1.1) Add velocity sources
+    computePass.setPipeline(velocityAddSourcesPipeline);
+    computePass.setBindGroup(0, velocityAddSourcesBindGroup); // u,v (in place)
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-    // 1) Advection
-    computePass.setPipeline(advectionPipeline);
-    computePass.setBindGroup(0, advectionBindGroup); // u, v, dye -> new u, new v, new dye
-    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+    // 1.2) Diffuse velocity
+    for (let i = 0; i < numJacobiIterations / 2; i++) {
+      computePass.setPipeline(velocityDiffusePipeline);
+      computePass.setBindGroup(0, velocityDiffuseBindGroupA); // u,v -> u_new,v_new
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-    // 1.5) Outflow
-    computePass.setPipeline(outflowPipeline);
-    computePass.setBindGroup(0, outflowBindGroup); // u_new, v_new, new_dye (in place)
-    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+      computePass.setPipeline(setBoundaryPipeline);
+      computePass.setBindGroup(0, setBoundaryBindGroup);
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-    // 2) Divergence
-    computePass.setPipeline(divergencePipeline);
-    computePass.setBindGroup(0, divergenceBindGroup); // new u, new v -> divergence
-    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+      computePass.setPipeline(velocityDiffusePipeline);
+      computePass.setBindGroup(0, velocityDiffuseBindGroupB); // u_new,v_new -> u,v
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-    // 3) Pressure solve (Jacobi iterations)
-    computePass.setPipeline(pressureSolvePipeline);
-    for (let i = 0; i < numJacobiIterations / 2; ++i) {
-      if (i % 2 === 0) {
-        computePass.setBindGroup(0, pressureSolveBindGroupA); // pressure, divergence -> new pressure
-        computePass.dispatchWorkgroups(dispatchX, dispatchY);
-        computePass.setBindGroup(0, pressureSolveBindGroupB); // new_pressure, divergence -> pressure
-        computePass.dispatchWorkgroups(dispatchX, dispatchY);
-      }
+      computePass.setPipeline(setBoundaryPipeline);
+      computePass.setBindGroup(0, setBoundaryBindGroup);
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
     }
 
-    // 4) Projection
-    computePass.setPipeline(projectionPipeline);
-    computePass.setBindGroup(0, projectionBindGroup); // new_u, new_v, pressure -> corrected u, v
+    // 1.3) Project velocity
+    computePass.setPipeline(velocityDivergencePipeline);
+    computePass.setBindGroup(0, velocityDivergenceBindGroup); // velocity, divergence (in place)
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-    // 5) Cleanup / copy new buffers to current buffers
-    computePass.setPipeline(cleanupPipeline);
-    computePass.setBindGroup(0, cleanupBindGroup);
+    computePass.setPipeline(setBoundaryPipeline);
+    computePass.setBindGroup(0, setBoundaryBindGroup);
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    for (let i = 0; i < numJacobiIterations; i++) {
+      computePass.setPipeline(velocityPressureSolvePipeline);
+      computePass.setBindGroup(0, velocityPressureSolveBindGroup); // pressure (in place)
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+      computePass.setPipeline(setBoundaryPipeline);
+      computePass.setBindGroup(0, setBoundaryBindGroup);
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+    }
+
+    computePass.setPipeline(velocityProjectPipeline);
+    computePass.setBindGroup(0, velocityProjectBindGroup); // u,v (in place)
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    computePass.setPipeline(setBoundaryPipeline);
+    computePass.setBindGroup(0, setBoundaryBindGroup);
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+
+    // 1.4) Advect velocity
+    computePass.setPipeline(velocityAdvectPipeline);
+    computePass.setBindGroup(0, velocityAdvectBindGroup); // u,v -> u_new,v_new
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    computePass.setPipeline(setBoundaryPipeline);
+    computePass.setBindGroup(0, setBoundaryBindGroup);
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    computePass.setPipeline(swapVelocityPipeline);
+    computePass.setBindGroup(0, swapVelocityBindGroup); // u_new,v_new -> u,v
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    // 1.5) Project velocity again
+    computePass.setPipeline(velocityDivergencePipeline);
+    computePass.setBindGroup(0, velocityDivergenceBindGroup); // velocity, divergence (in place)
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    computePass.setPipeline(setBoundaryPipeline);
+    computePass.setBindGroup(0, setBoundaryBindGroup);
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    for (let i = 0; i < numJacobiIterations; i++) {
+      computePass.setPipeline(velocityPressureSolvePipeline);
+      computePass.setBindGroup(0, velocityPressureSolveBindGroup); // pressure (in place)
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+      computePass.setPipeline(setBoundaryPipeline);
+      computePass.setBindGroup(0, setBoundaryBindGroup);
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+    }
+
+    computePass.setPipeline(velocityProjectPipeline);
+    computePass.setBindGroup(0, velocityProjectBindGroup); // u,v (in place)
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    computePass.setPipeline(setBoundaryPipeline);
+    computePass.setBindGroup(0, setBoundaryBindGroup);
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+
+    // 2) Density step
+
+    // 2.1) Add density sources
+    computePass.setPipeline(densityAddSourcesPipeline);
+    computePass.setBindGroup(0, densityAddSourcesBindGroup); // density (in place)
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    // 2.2) Diffuse density
+    for (let i = 0; i < numJacobiIterations / 2; i++) {
+      computePass.setPipeline(densityDiffusePipeline);
+      computePass.setBindGroup(0, densityDiffuseBindGroupA);  // density -> density_new
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+      computePass.setPipeline(setBoundaryPipeline);
+      computePass.setBindGroup(0, setBoundaryBindGroup);
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+      computePass.setPipeline(densityDiffusePipeline);
+      computePass.setBindGroup(0, densityDiffuseBindGroupB); // density_new -> density
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+      computePass.setPipeline(setBoundaryPipeline);
+      computePass.setBindGroup(0, setBoundaryBindGroup);
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+    }
+
+    // 2.3) Advect density
+    computePass.setPipeline(densityAdvectPipeline);
+    computePass.setBindGroup(0, densityAdvectBindGroup); // density -> density_new
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    computePass.setPipeline(setBoundaryPipeline);
+    computePass.setBindGroup(0, setBoundaryBindGroup);
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
+    computePass.setPipeline(swapDensityPipeline);;
+    computePass.setBindGroup(0, swapDensityBindGroup); // density_new -> density
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+
 
     computePass.end();
   }
