@@ -30,10 +30,16 @@ struct UintMetadata {
 
 // density sources field
 @group(0) @binding(10) var<storage, read> density_sources: array<f32>;
+@group(0) @binding(11) var<storage, read> density_constants: array<f32>;
 
 // velocity sources field
-@group(0) @binding(11) var<storage, read> u_sources: array<f32>;
-@group(0) @binding(12) var<storage, read> v_sources: array<f32>;
+@group(0) @binding(12) var<storage, read> u_sources: array<f32>;
+@group(0) @binding(13) var<storage, read> v_sources: array<f32>;
+@group(0) @binding(14) var<storage, read> u_constants: array<f32>;
+@group(0) @binding(15) var<storage, read> v_constants: array<f32>;
+
+// boundary type field
+@group(0) @binding(16) var<storage, read> obstacles: array<u32>;
 
 
 
@@ -118,6 +124,12 @@ fn density_add_sources_main(
     }
 
     let idx = idx_center(i, j);
+
+    if (density_constants[idx] != 0.0) {
+        density[idx] = density_constants[idx];
+        return;
+    }
+    
     density[idx] += float_metadata.delta_time * density_sources[idx];
 }
 
@@ -193,8 +205,17 @@ fn velocity_add_sources_main(
     let idx = idx_center(i, j);
 
     // add velocity sources
-    u[idx] += float_metadata.delta_time * u_sources[idx];
-    v[idx] += float_metadata.delta_time * v_sources[idx];
+    if (u_constants[idx] != 0.0) {
+        u[idx] = u_constants[idx];
+    } else {
+        u[idx] += float_metadata.delta_time * u_sources[idx];
+    }
+
+    if (v_constants[idx] != 0.0) {
+        v[idx] = v_constants[idx];
+    } else {
+        v[idx] += float_metadata.delta_time * v_sources[idx];
+    }
 }
 
 
@@ -332,7 +353,7 @@ fn velocity_advect_main(
 
 
 @compute @workgroup_size(16, 16)
-fn set_boundary_main(
+fn set_boundary_scalar_main(
     @builtin(global_invocation_id) global_id : vec3u,
     @builtin(workgroup_id) workgroup_id : vec3u,
     @builtin(local_invocation_id) local_id : vec3u,
@@ -346,38 +367,78 @@ fn set_boundary_main(
     }
 
     let idx = idx_center(i, j);
+    let idx_interior = idx_center(
+        clamp(i, 1u, uint_metadata.width - 2u),
+        clamp(j, 1u, uint_metadata.height - 2u)
+    );
 
-    // scalars (density, pressure, divergence)
-    {
+    let btype = obstacles[idx];
+
+    if (btype == 0u) { // outflow
+        // set density and divergence to zero
+        density[idx] = 0.0;
+        density_new[idx] = 0.0;
+        divergence[idx] = 0.0;
+
+        // set pressure to zero gradient
+        pressure[idx] = pressure[idx_interior];
+        return;
+
+    } else { // solid wall or inflow
         // copy from nearest interior cell
-        let ii = clamp(i, 1u, uint_metadata.width - 2u);
-        let jj = clamp(j, 1u, uint_metadata.height - 2u);
-        density[idx] = density[idx_center(ii, jj)];
-        density_new[idx] = density_new[idx_center(ii, jj)];
-        pressure[idx] = pressure[idx_center(ii, jj)];
-        divergence[idx] = divergence[idx_center(ii, jj)];
+        density[idx] = density[idx_interior];
+        density_new[idx] = density_new[idx_interior];
+        pressure[idx] = pressure[idx_interior];
+        divergence[idx] = divergence[idx_interior];
+    }
+}
+
+@compute @workgroup_size(16, 16)
+fn set_boundary_vector_main(
+    @builtin(global_invocation_id) global_id : vec3u,
+    @builtin(workgroup_id) workgroup_id : vec3u,
+    @builtin(local_invocation_id) local_id : vec3u,
+) {
+    let i = global_id.x;
+    let j = global_id.y;
+
+    // only process edge cells
+    if (i > 0u && j > 0u && i < uint_metadata.width - 1u && j < uint_metadata.height - 1u) {
+        return;
     }
 
-    // velocity components (u, v)
-    {
-        // invert velocity component if on boundary
-        let ii = clamp(i, 1u, uint_metadata.width - 2u);
-        let jj = clamp(j, 1u, uint_metadata.height - 2u);
+    let idx = idx_center(i, j);
+    let idx_interior = idx_center(
+        clamp(i, 1u, uint_metadata.width - 2u),
+        clamp(j, 1u, uint_metadata.height - 2u)
+    );
 
+    // velocity components (u, v)
+    let btype = obstacles[idx];
+
+    if (btype == 0u) { // outflow
+        // copy from interior, no reflection
+        u[idx] = u[idx_interior];
+        v[idx] = v[idx_interior];
+        u_new[idx] = u_new[idx_interior];
+        v_new[idx] = v_new[idx_interior];
+
+    } else { // solid wall
+        // invert velocity component if on boundary
         if (i == 0u || i == uint_metadata.width - 1u) {
-            u[idx] = -u[idx_center(ii, jj)];
-            u_new[idx] = -u_new[idx_center(ii, jj)];
+            u[idx] = -u[idx_interior];
+            u_new[idx] = -u_new[idx_interior];
         } else {
-            u[idx] = u[idx_center(ii, jj)];
-            u_new[idx] = u_new[idx_center(ii, jj)];
+            u[idx] = u[idx_interior];
+            u_new[idx] = u_new[idx_interior];
         }
 
         if (j == 0u || j == uint_metadata.height - 1u) {
-            v[idx] = -v[idx_center(ii, jj)];
-            v_new[idx] = -v_new[idx_center(ii, jj)];
+            v[idx] = -v[idx_interior];
+            v_new[idx] = -v_new[idx_interior];
         } else {
-            v[idx] = v[idx_center(ii, jj)];
-            v_new[idx] = v_new[idx_center(ii, jj)];
+            v[idx] = v[idx_interior];
+            v_new[idx] = v_new[idx_interior];
         }
     }
 }

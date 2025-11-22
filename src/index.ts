@@ -80,12 +80,39 @@ const pressureBuffer = createBuffer(pressure);
 
 // 5) Sources buffers
 const densitySources = new Float32Array(width * height).fill(0.0);
-const uSources = new Float32Array(width * height).fill(0.0);
-const vSources = new Float32Array(width * height).fill(0.0);
+const densityConstants = new Float32Array(width * height).fill(0.0);
+
+// Add a vertical line of density constants
+for (let y = 0; y < height; ++y) {
+  const x = 10;
+  const idx = y * width + x;
+  densityConstants[idx] = 0.5;
+}
 
 const densitySourcesBuffer = createBuffer(densitySources);
+const densityConstantsBuffer = createBuffer(densityConstants);
+
+
+const uSources = new Float32Array(width * height).fill(0.0);
+const vSources = new Float32Array(width * height).fill(0.0);
+const uConstants = new Float32Array(width * height).fill(0.0);
+const vConstants = new Float32Array(width * height).fill(0.0);
+
+// Add a vertical line of rightward velocity constants
+for (let y = 0; y < height; ++y) {
+  const x = 1;
+  const idx = y * width + x;
+  uConstants[idx] = 50.0;
+}
+
 const uSourcesBuffer = createBuffer(uSources);
 const vSourcesBuffer = createBuffer(vSources);
+
+const uConstantsBuffer = createBuffer(uConstants);
+const vConstantsBuffer = createBuffer(vConstants);
+
+const obstacles = new Uint32Array(width * height).fill(0);
+const obstaclesBuffer = createBuffer(obstacles);
 
 
 // ----- Create compute/graphics pipelines -----
@@ -112,10 +139,16 @@ const renderShaderModule = device.createShaderModule({ code: renderShaderCode })
 
 // // density sources field
 // @group(0) @binding(10) var<storage, read> density_sources: array<f32>;
+// @group(0) @binding(11) var<storage, read> density_constants: array<f32>;
 
 // // velocity sources field
 // @group(0) @binding(11) var<storage, read> u_sources: array<f32>;
 // @group(0) @binding(12) var<storage, read> v_sources: array<f32>;
+// @group(0) @binding(13) var<storage, read> u_constants: array<f32>;
+// @group(0) @binding(14) var<storage, read> v_constants: array<f32>;
+
+// // boundary type field
+// @group(0) @binding(15) var<storage, read> obstacles: array<u32>;
 
 
 const densityAddSourcesPipeline = device.createComputePipeline({
@@ -140,8 +173,12 @@ const densityAddSourcesBindGroup = device.createBindGroup({
     // { binding: 8, resource: { buffer: divergenceBuffer } },
     // { binding: 9, resource: { buffer: pressureBuffer } },
     { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    // { binding: 11, resource: { buffer: uSourcesBuffer } },
-    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+    { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    // { binding: 16, resource: { buffer: boundaryTypesBuffer } },
   ],
 });
 
@@ -168,8 +205,12 @@ const densityDiffuseBindGroupA = device.createBindGroup({
     // { binding: 8, resource: { buffer: divergenceBuffer } },
     // { binding: 9, resource: { buffer: pressureBuffer } },
     // { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    // { binding: 11, resource: { buffer: uSourcesBuffer } },
-    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    // { binding: 16, resource: { buffer: boundaryTypesBuffer } },
   ],
 });
 
@@ -187,8 +228,12 @@ const densityDiffuseBindGroupB = device.createBindGroup({
     // { binding: 8, resource: { buffer: divergenceBuffer } },
     // { binding: 9, resource: { buffer: pressureBuffer } },
     // { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    // { binding: 11, resource: { buffer: uSourcesBuffer } },
-    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    // { binding: 16, resource: { buffer: boundaryTypesBuffer } },
   ],
 });
 
@@ -215,8 +260,12 @@ const densityAdvectBindGroup = device.createBindGroup({
     // { binding: 8, resource: { buffer: divergenceBuffer } },
     // { binding: 9, resource: { buffer: pressureBuffer } },
     // { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    // { binding: 11, resource: { buffer: uSourcesBuffer } },
-    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    // { binding: 16, resource: { buffer: boundaryTypesBuffer } },
   ],
 });
 
@@ -243,8 +292,12 @@ const velocityAddSourcesBindGroup = device.createBindGroup({
     // { binding: 8, resource: { buffer: divergenceBuffer } },
     // { binding: 9, resource: { buffer: pressureBuffer } },
     // { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    { binding: 11, resource: { buffer: uSourcesBuffer } },
-    { binding: 12, resource: { buffer: vSourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    { binding: 12, resource: { buffer: uSourcesBuffer } },
+    { binding: 13, resource: { buffer: vSourcesBuffer } },
+    { binding: 14, resource: { buffer: uConstantsBuffer } },
+    { binding: 15, resource: { buffer: vConstantsBuffer } },
+    // { binding: 16, resource: { buffer: boundaryTypesBuffer } },
   ],
 });
 
@@ -271,8 +324,12 @@ const velocityDiffuseBindGroupA = device.createBindGroup({
     // { binding: 8, resource: { buffer: divergenceBuffer } },
     // { binding: 9, resource: { buffer: pressureBuffer } },
     // { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    // { binding: 11, resource: { buffer: uSourcesBuffer } },
-    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    // { binding: 16, resource: { buffer: boundaryTypesBuffer } },
   ],
 });
 
@@ -290,8 +347,12 @@ const velocityDiffuseBindGroupB = device.createBindGroup({
     // { binding: 8, resource: { buffer: divergenceBuffer } },
     // { binding: 9, resource: { buffer: pressureBuffer } },
     // { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    // { binding: 11, resource: { buffer: uSourcesBuffer } },
-    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    // { binding: 16, resource: { buffer: boundaryTypesBuffer } },
   ],
 });
 
@@ -318,8 +379,12 @@ const velocityDivergenceBindGroup = device.createBindGroup({
     { binding: 8, resource: { buffer: divergenceBuffer } },
     { binding: 9, resource: { buffer: pressureBuffer } },
     // { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    // { binding: 11, resource: { buffer: uSourcesBuffer } },
-    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    // { binding: 16, resource: { buffer: boundaryTypesBuffer } },
   ],
 });
 
@@ -346,8 +411,12 @@ const velocityPressureSolveBindGroup = device.createBindGroup({
     { binding: 8, resource: { buffer: divergenceBuffer } },
     { binding: 9, resource: { buffer: pressureBuffer } },
     // { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    // { binding: 11, resource: { buffer: uSourcesBuffer } },
-    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    // { binding: 16, resource: { buffer: boundaryTypesBuffer } },
   ],
 });
 
@@ -374,8 +443,12 @@ const velocityProjectBindGroup = device.createBindGroup({
     // { binding: 8, resource: { buffer: divergenceBuffer } },
     { binding: 9, resource: { buffer: pressureBuffer } },
     // { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    // { binding: 11, resource: { buffer: uSourcesBuffer } },
-    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    // { binding: 16, resource: { buffer: boundaryTypesBuffer } },
   ],
 });
 
@@ -402,22 +475,57 @@ const velocityAdvectBindGroup = device.createBindGroup({
     // { binding: 8, resource: { buffer: divergenceBuffer } },
     // { binding: 9, resource: { buffer: pressureBuffer } },
     // { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    // { binding: 11, resource: { buffer: uSourcesBuffer } },
-    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    // { binding: 16, resource: { buffer: boundaryTypesBuffer } },
   ],
 });
 
 
-const setBoundaryPipeline = device.createComputePipeline({
+const setBoundaryScalarPipeline = device.createComputePipeline({
   layout: "auto",
   compute: {
     module: computeShaderModule,
-    entryPoint: "set_boundary_main",
+    entryPoint: "set_boundary_scalar_main",
   },
 });
 
-const setBoundaryBindGroup = device.createBindGroup({
-  layout: setBoundaryPipeline.getBindGroupLayout(0),
+const setBoundaryScalarBindGroup = device.createBindGroup({
+  layout: setBoundaryScalarPipeline.getBindGroupLayout(0),
+  entries: [
+    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 1, resource: { buffer: uintMetadataBuffer } },
+    // { binding: 2, resource: { buffer: uBuffer } },
+    // { binding: 3, resource: { buffer: vBuffer } },
+    // { binding: 4, resource: { buffer: newUBuffer } },
+    // { binding: 5, resource: { buffer: newVBuffer } },
+    { binding: 6, resource: { buffer: densityBuffer } },
+    { binding: 7, resource: { buffer: newDensityBuffer } },
+    { binding: 8, resource: { buffer: divergenceBuffer } },
+    { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 10, resource: { buffer: densitySourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    { binding: 16, resource: { buffer: obstaclesBuffer } },
+  ],
+});
+
+const setBoundaryVectorPipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: {
+    module: computeShaderModule,
+    entryPoint: "set_boundary_vector_main",
+  },
+});
+
+const setBoundaryVectorBindGroup = device.createBindGroup({
+  layout: setBoundaryVectorPipeline.getBindGroupLayout(0),
   entries: [
     // { binding: 0, resource: { buffer: floatMetadataBuffer } },
     { binding: 1, resource: { buffer: uintMetadataBuffer } },
@@ -425,13 +533,17 @@ const setBoundaryBindGroup = device.createBindGroup({
     { binding: 3, resource: { buffer: vBuffer } },
     { binding: 4, resource: { buffer: newUBuffer } },
     { binding: 5, resource: { buffer: newVBuffer } },
-    { binding: 6, resource: { buffer: densityBuffer } },
-    { binding: 7, resource: { buffer: newDensityBuffer } },
-    { binding: 8, resource: { buffer: divergenceBuffer } },
-    { binding: 9, resource: { buffer: pressureBuffer } },
+    // { binding: 6, resource: { buffer: densityBuffer } },
+    // { binding: 7, resource: { buffer: newDensityBuffer } },
+    // { binding: 8, resource: { buffer: divergenceBuffer } },
+    // { binding: 9, resource: { buffer: pressureBuffer } },
     // { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    // { binding: 11, resource: { buffer: uSourcesBuffer } },
-    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    { binding: 16, resource: { buffer: obstaclesBuffer } },
   ],
 });
 
@@ -458,8 +570,12 @@ const swapDensityBindGroup = device.createBindGroup({
     // { binding: 8, resource: { buffer: divergenceBuffer } },
     // { binding: 9, resource: { buffer: pressureBuffer } },
     // { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    // { binding: 11, resource: { buffer: uSourcesBuffer } },
-    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    // { binding: 16, resource: { buffer: boundaryTypesBuffer } },
   ],
 });
 
@@ -486,8 +602,12 @@ const swapVelocityBindGroup = device.createBindGroup({
     // { binding: 8, resource: { buffer: divergenceBuffer } },
     // { binding: 9, resource: { buffer: pressureBuffer } },
     // { binding: 10, resource: { buffer: densitySourcesBuffer } },
-    // { binding: 11, resource: { buffer: uSourcesBuffer } },
-    // { binding: 12, resource: { buffer: vSourcesBuffer } },
+    // { binding: 11, resource: { buffer: densityConstantsBuffer } },
+    // { binding: 12, resource: { buffer: uSourcesBuffer } },
+    // { binding: 13, resource: { buffer: vSourcesBuffer } },
+    // { binding: 14, resource: { buffer: uConstantsBuffer } },
+    // { binding: 15, resource: { buffer: vConstantsBuffer } },
+    // { binding: 16, resource: { buffer: boundaryTypesBuffer } },
   ],
 });
 
@@ -548,16 +668,22 @@ function frame() {
       computePass.setBindGroup(0, velocityDiffuseBindGroupA); // u,v -> u_new,v_new
       computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-      computePass.setPipeline(setBoundaryPipeline);
-      computePass.setBindGroup(0, setBoundaryBindGroup);
+      computePass.setPipeline(setBoundaryScalarPipeline);
+      computePass.setBindGroup(0, setBoundaryScalarBindGroup);
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+      computePass.setPipeline(setBoundaryVectorPipeline);
+      computePass.setBindGroup(0, setBoundaryVectorBindGroup);
       computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
       computePass.setPipeline(velocityDiffusePipeline);
       computePass.setBindGroup(0, velocityDiffuseBindGroupB); // u_new,v_new -> u,v
       computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-      computePass.setPipeline(setBoundaryPipeline);
-      computePass.setBindGroup(0, setBoundaryBindGroup);
+      computePass.setPipeline(setBoundaryScalarPipeline);
+      computePass.setBindGroup(0, setBoundaryScalarBindGroup);
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+      computePass.setPipeline(setBoundaryVectorPipeline);
+      computePass.setBindGroup(0, setBoundaryVectorBindGroup);
       computePass.dispatchWorkgroups(dispatchX, dispatchY);
     }
 
@@ -566,8 +692,11 @@ function frame() {
     computePass.setBindGroup(0, velocityDivergenceBindGroup); // velocity, divergence (in place)
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-    computePass.setPipeline(setBoundaryPipeline);
-    computePass.setBindGroup(0, setBoundaryBindGroup);
+    computePass.setPipeline(setBoundaryScalarPipeline);
+    computePass.setBindGroup(0, setBoundaryScalarBindGroup);
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+    computePass.setPipeline(setBoundaryVectorPipeline);
+    computePass.setBindGroup(0, setBoundaryVectorBindGroup);
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
     for (let i = 0; i < numJacobiIterations; i++) {
@@ -575,8 +704,11 @@ function frame() {
       computePass.setBindGroup(0, velocityPressureSolveBindGroup); // pressure (in place)
       computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-      computePass.setPipeline(setBoundaryPipeline);
-      computePass.setBindGroup(0, setBoundaryBindGroup);
+      computePass.setPipeline(setBoundaryScalarPipeline);
+      computePass.setBindGroup(0, setBoundaryScalarBindGroup);
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+      computePass.setPipeline(setBoundaryVectorPipeline);
+      computePass.setBindGroup(0, setBoundaryVectorBindGroup);
       computePass.dispatchWorkgroups(dispatchX, dispatchY);
     }
 
@@ -584,8 +716,11 @@ function frame() {
     computePass.setBindGroup(0, velocityProjectBindGroup); // u,v (in place)
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-    computePass.setPipeline(setBoundaryPipeline);
-    computePass.setBindGroup(0, setBoundaryBindGroup);
+    computePass.setPipeline(setBoundaryScalarPipeline);
+    computePass.setBindGroup(0, setBoundaryScalarBindGroup);
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+    computePass.setPipeline(setBoundaryVectorPipeline);
+    computePass.setBindGroup(0, setBoundaryVectorBindGroup);
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
 
@@ -594,8 +729,11 @@ function frame() {
     computePass.setBindGroup(0, velocityAdvectBindGroup); // u,v -> u_new,v_new
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-    computePass.setPipeline(setBoundaryPipeline);
-    computePass.setBindGroup(0, setBoundaryBindGroup);
+    computePass.setPipeline(setBoundaryScalarPipeline);
+    computePass.setBindGroup(0, setBoundaryScalarBindGroup);
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+    computePass.setPipeline(setBoundaryVectorPipeline);
+    computePass.setBindGroup(0, setBoundaryVectorBindGroup);
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
     computePass.setPipeline(swapVelocityPipeline);
@@ -607,8 +745,11 @@ function frame() {
     computePass.setBindGroup(0, velocityDivergenceBindGroup); // velocity, divergence (in place)
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-    computePass.setPipeline(setBoundaryPipeline);
-    computePass.setBindGroup(0, setBoundaryBindGroup);
+    computePass.setPipeline(setBoundaryScalarPipeline);
+    computePass.setBindGroup(0, setBoundaryScalarBindGroup);
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+    computePass.setPipeline(setBoundaryVectorPipeline);
+    computePass.setBindGroup(0, setBoundaryVectorBindGroup);
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
     for (let i = 0; i < numJacobiIterations; i++) {
@@ -616,8 +757,11 @@ function frame() {
       computePass.setBindGroup(0, velocityPressureSolveBindGroup); // pressure (in place)
       computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-      computePass.setPipeline(setBoundaryPipeline);
-      computePass.setBindGroup(0, setBoundaryBindGroup);
+      computePass.setPipeline(setBoundaryScalarPipeline);
+      computePass.setBindGroup(0, setBoundaryScalarBindGroup);
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+      computePass.setPipeline(setBoundaryVectorPipeline);
+      computePass.setBindGroup(0, setBoundaryVectorBindGroup);
       computePass.dispatchWorkgroups(dispatchX, dispatchY);
     }
 
@@ -625,8 +769,11 @@ function frame() {
     computePass.setBindGroup(0, velocityProjectBindGroup); // u,v (in place)
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-    computePass.setPipeline(setBoundaryPipeline);
-    computePass.setBindGroup(0, setBoundaryBindGroup);
+    computePass.setPipeline(setBoundaryScalarPipeline);
+    computePass.setBindGroup(0, setBoundaryScalarBindGroup);
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+    computePass.setPipeline(setBoundaryVectorPipeline);
+    computePass.setBindGroup(0, setBoundaryVectorBindGroup);
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
 
@@ -643,16 +790,22 @@ function frame() {
       computePass.setBindGroup(0, densityDiffuseBindGroupA);  // density -> density_new
       computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-      computePass.setPipeline(setBoundaryPipeline);
-      computePass.setBindGroup(0, setBoundaryBindGroup);
+      computePass.setPipeline(setBoundaryScalarPipeline);
+      computePass.setBindGroup(0, setBoundaryScalarBindGroup);
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+      computePass.setPipeline(setBoundaryVectorPipeline);
+      computePass.setBindGroup(0, setBoundaryVectorBindGroup);
       computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
       computePass.setPipeline(densityDiffusePipeline);
       computePass.setBindGroup(0, densityDiffuseBindGroupB); // density_new -> density
       computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-      computePass.setPipeline(setBoundaryPipeline);
-      computePass.setBindGroup(0, setBoundaryBindGroup);
+      computePass.setPipeline(setBoundaryScalarPipeline);
+      computePass.setBindGroup(0, setBoundaryScalarBindGroup);
+      computePass.dispatchWorkgroups(dispatchX, dispatchY);
+      computePass.setPipeline(setBoundaryVectorPipeline);
+      computePass.setBindGroup(0, setBoundaryVectorBindGroup);
       computePass.dispatchWorkgroups(dispatchX, dispatchY);
     }
 
@@ -661,8 +814,11 @@ function frame() {
     computePass.setBindGroup(0, densityAdvectBindGroup); // density -> density_new
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
-    computePass.setPipeline(setBoundaryPipeline);
-    computePass.setBindGroup(0, setBoundaryBindGroup);
+    computePass.setPipeline(setBoundaryScalarPipeline);
+    computePass.setBindGroup(0, setBoundaryScalarBindGroup);
+    computePass.dispatchWorkgroups(dispatchX, dispatchY);
+    computePass.setPipeline(setBoundaryVectorPipeline);
+    computePass.setBindGroup(0, setBoundaryVectorBindGroup);
     computePass.dispatchWorkgroups(dispatchX, dispatchY);
 
     computePass.setPipeline(swapDensityPipeline);;
