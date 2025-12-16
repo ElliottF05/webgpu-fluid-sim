@@ -15,17 +15,16 @@ struct UintMetadata {
 @group(0) @binding(1) var<uniform> uint_metadata: UintMetadata;
 
 // data buffers
-@group(0) @binding(2) var<storage, read_write> mass_buf: array<vec2<f32>>;
+@group(0) @binding(2) var<storage, read_write> mass_buf: array<f32>;
 @group(0) @binding(3) var<storage, read_write> pos_buf: array<vec2<f32>>;
 @group(0) @binding(4) var<storage, read_write> vel_buf: array<vec2<f32>>;
 
-@group(0) @binding(5) var<storage, read_write> new_pos_buf: array<vec2<f32>>;
-@group(0) @binding(6) var<storage, read_write> new_vel_buf: array<vec2<f32>>;
+
+// USING VELOCITY VERLET INTEGRATION
 
 @compute @workgroup_size(16)
-fn gravity_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn half_vel_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let i = global_id.x;
-
     if i >= uint_metadata.num_bodies {
         return;
     }
@@ -49,27 +48,20 @@ fn gravity_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         f_net += f_grav;
     }
 
-    // update velocity
-    let new_vel = vel_buf[i] + float_metadata.delta_time * f_net / m1;
-    new_vel_buf[i] = new_vel;
-
-    // update position (using new_vel for symplectic euler)
-    let new_pos = pos_buf[i] + float_metadata.delta_time * new_vel;
-    new_pos_buf[i] = new_pos;
+    // update velocity by a half step
+    let accel = f_net / m1;
+    let dt = float_metadata.delta_time;
+    vel_buf[i] = vel_buf[i] + 0.5 * accel * dt;
 }
 
 @compute @workgroup_size(16)
-fn swap_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn pos_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let i = global_id.x;
     if i >= uint_metadata.num_bodies {
         return;
     }
 
-    let temp_pos = pos_buf[i];
-    pos_buf[i] = new_pos_buf[i];
-    new_pos_buf[i] = temp_pos;
-
-    let temp_vel = vel_buf[i];
-    vel_buf[i] = new_vel_buf[i];
-    new_vel_buf[i] = temp_vel;
+    // update position using half velocity
+    let dt = float_metadata.delta_time;
+    pos_buf[i] = pos_buf[i] + vel_buf[i] * dt;
 }

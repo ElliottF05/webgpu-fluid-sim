@@ -68,10 +68,7 @@ for (let i = 0; i < numBodies; i++) {
   initPos[2*i] = x;
   initPos[2*i + 1] = y;
 }
-const newPos = new Float32Array(2 * numBodies).fill(0.0);
-
 const posBuffer = createBuffer(initPos);
-const newPosBuffer = createBuffer(newPos);
 
 
 // Velocity buffers
@@ -82,11 +79,7 @@ for (let i = 0; i < numBodies; i++) {
   initVel[2*i] = x;
   initVel[2*i + 1] = y;
 }
-const newVel = new Float32Array(2 * numBodies).fill(0.0);
-
 const velBuffer = createBuffer(initVel);
-const newVelBuffer = createBuffer(newVel);
-
 
 // ----- Create compute/graphics pipelines -----
 const computeShaderModule = device.createShaderModule({ code: computeShaderCode });
@@ -97,51 +90,44 @@ const renderShaderModule = device.createShaderModule({ code: renderShaderCode })
 // @group(0) @binding(1) var<uniform> uint_metadata: UintMetadata;
 
 // // data buffers
-// @group(0) @binding(2) var<storage, read_write> mass_buf: array<vec2<f32>>;
+// @group(0) @binding(2) var<storage, read_write> mass_buf: array<f32>;
 // @group(0) @binding(3) var<storage, read_write> pos_buf: array<vec2<f32>>;
 // @group(0) @binding(4) var<storage, read_write> vel_buf: array<vec2<f32>>;
 
-// @group(0) @binding(5) var<storage, read_write> new_pos_buf: array<vec2<f32>>;
-// @group(0) @binding(6) var<storage, read_write> new_vel_buf: array<vec2<f32>>;
-
 // Compute pipelines
-const gravityStepPipeline = device.createComputePipeline({
+const halfVelocityStepPipeline = device.createComputePipeline({
   layout: "auto",
   compute: {
     module: computeShaderModule,
-    entryPoint: "gravity_step_main",
+    entryPoint: "half_vel_step_main",
   },
 })
-const gravityStepBindGroup = device.createBindGroup({
-  layout: gravityStepPipeline.getBindGroupLayout(0),
+const halfVelocityStepBindGroup = device.createBindGroup({
+  layout: halfVelocityStepPipeline.getBindGroupLayout(0),
   entries: [
     { binding: 0, resource: { buffer: floatMetadataBuffer } },
     { binding: 1, resource: { buffer: uintMetadataBuffer } },
     { binding: 2, resource: { buffer: massBuffer } },
     { binding: 3, resource: { buffer: posBuffer } },
     { binding: 4, resource: { buffer: velBuffer } },
-    { binding: 5, resource: { buffer: newPosBuffer } },
-    { binding: 6, resource: { buffer: newVelBuffer } },
   ]
 })
 
-const swapPipeline = device.createComputePipeline({
+const posStepPipeline = device.createComputePipeline({
   layout: "auto",
   compute: {
     module: computeShaderModule,
-    entryPoint: "swap_main",
+    entryPoint: "pos_step_main",
   },
 })
-const swapBindGroup = device.createBindGroup({
-  layout: swapPipeline.getBindGroupLayout(0),
+const posStepBindGroup = device.createBindGroup({
+  layout: posStepPipeline.getBindGroupLayout(0),
   entries: [
-    // { binding: 0, resource: { buffer: floatMetadataBuffer } },
+    { binding: 0, resource: { buffer: floatMetadataBuffer } },
     { binding: 1, resource: { buffer: uintMetadataBuffer } },
     // { binding: 2, resource: { buffer: massBuffer } },
     { binding: 3, resource: { buffer: posBuffer } },
     { binding: 4, resource: { buffer: velBuffer } },
-    { binding: 5, resource: { buffer: newPosBuffer } },
-    { binding: 6, resource: { buffer: newVelBuffer } },
   ]
 })
 
@@ -183,12 +169,16 @@ function frame() {
   // Compute pass
   const computePass = commandEncoder.beginComputePass();
   for (let i = 0; i < substeps; i++) {
-    computePass.setPipeline(gravityStepPipeline);
-    computePass.setBindGroup(0, gravityStepBindGroup);
+    computePass.setPipeline(halfVelocityStepPipeline);
+    computePass.setBindGroup(0, halfVelocityStepBindGroup);
     computePass.dispatchWorkgroups(dispatchX);
 
-    computePass.setPipeline(swapPipeline);
-    computePass.setBindGroup(0, swapBindGroup);
+    computePass.setPipeline(posStepPipeline);
+    computePass.setBindGroup(0, posStepBindGroup);
+    computePass.dispatchWorkgroups(dispatchX);
+
+    computePass.setPipeline(halfVelocityStepPipeline);
+    computePass.setBindGroup(0, halfVelocityStepBindGroup);
     computePass.dispatchWorkgroups(dispatchX);
   }
   
