@@ -31,7 +31,11 @@ fn half_vel_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
+    let g = float_metadata.grav_constant;
+    let dt = float_metadata.delta_time;
+
     let pos1 = pos_buf[i];
+    let m1 = mass_buf[i];
     var accel = vec2<f32>(0.0, 0.0);
 
     // accumulate force from all other bodies
@@ -44,16 +48,17 @@ fn half_vel_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         let r = pos2 - pos1;
         let dist_squared = dot(r, r);
-        let eps = float_metadata.epsilon;
 
-        let inv_denom = inverseSqrt(dist_squared + eps*eps);
+        let m_eff = max(m1, m2);
+        let eps = sqrt(g * m_eff * dt);
+
+        let inv_denom = inverseSqrt(dist_squared + eps * eps);
         let inv_denom_3 = inv_denom * inv_denom * inv_denom;
         
-        accel += float_metadata.grav_constant * m2 * r * inv_denom_3;
+        accel += g * m2 * r * inv_denom_3;
     }
 
     // update velocity by a half step
-    let dt = float_metadata.delta_time;
     vel_buf[i] = vel_buf[i] + 0.5 * accel * dt;
 }
 
