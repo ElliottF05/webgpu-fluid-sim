@@ -61,16 +61,8 @@ export function createRenderPipelines(device: GPUDevice, canvasFormat: GPUTextur
             targets: [{ 
             format: canvasFormat,
             blend: {
-                color: {
-                srcFactor: "one",
-                dstFactor: "one",
-                operation: "add"
-                },
-                alpha: {
-                srcFactor: "one",
-                dstFactor: "one-minus-src-alpha",
-                operation: "add",
-                },
+                color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+                alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add", },
             },
             writeMask: GPUColorWrite.ALL,
             }],
