@@ -37,7 +37,7 @@ export function createSimBuffers(device: GPUDevice, config: SimConfig, camCenter
 
     // mass buffer
     const massArray = new Float32Array(config.numBodies).fill(1.0);
-    massArray[0] = 10000.0;
+    massArray[1] = 10000.0;
     const massBuffer = createBuffer(device, massArray);
 
     // pos buffer
@@ -48,7 +48,7 @@ export function createSimBuffers(device: GPUDevice, config: SimConfig, camCenter
         initPosArray[2 * i] = x;
         initPosArray[2 * i + 1] = y;
     }
-    initPosArray[0] = 20.0;
+    initPosArray[2] = 20.0;
     const posBuffer = createBuffer(device, initPosArray);
 
     // velocity buffer
@@ -59,7 +59,7 @@ export function createSimBuffers(device: GPUDevice, config: SimConfig, camCenter
         initVelArray[2 * i] = x;
         initVelArray[2 * i + 1] = y;
     }
-    initVelArray[1] = 20.0;
+    initVelArray[3] = 20.0;
     const velBuffer = createBuffer(device, initVelArray);
 
     return {
