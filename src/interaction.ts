@@ -39,7 +39,7 @@ export class InteractionController {
 
         // normalized to [-1,1]
         const u = (2 * px / rect.width) - 1;
-        const v = (2 * py / rect.height) - 1;
+        const v = -((2 * py / rect.height) - 1);
 
         // to world pos
         const worldX = u * camHalfSizeX + camCenterX;
@@ -81,7 +81,7 @@ export class InteractionController {
 
         // shift camera
         camCenter[0] += x1 - x2;
-        camCenter[1] += y2 - y1;
+        camCenter[1] += y1 - y2;
         }, {passive: false})
     }
 
@@ -90,7 +90,7 @@ export class InteractionController {
             const [worldX, worldY] = this.getMouseWorldPos(clientX, clientY);
             const userBodyPos = this.sim.getUserBodyPos();
             userBodyPos[0] = worldX;
-            userBodyPos[1] = -worldY;
+            userBodyPos[1] = worldY;
             this.sim.setUserBodyMass(10000.0);
         }
 
@@ -151,7 +151,11 @@ export class InteractionController {
 
         window.addEventListener("keydown", (e) => {
             if (e.key === "v") {
-                this.interactionMode = "body";
+                if (this.interactionMode === "body") {
+                    this.interactionMode = "camera";
+                } else {
+                    this.interactionMode = "body";
+                }
             }
         });
     }
