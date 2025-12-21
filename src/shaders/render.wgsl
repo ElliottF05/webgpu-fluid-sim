@@ -17,6 +17,7 @@ struct UintMetadata {
 struct VSOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) uv: vec2<f32>, // quad local coords in [-1,1]
+    @location(1) @interpolate(flat) is_user_body: u32,
 };
 
 
@@ -54,6 +55,8 @@ fn vertex_main(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u3
 
     var out: VSOut;
 
+    out.is_user_body = select(0u, 1u, iid == 0u);
+
     if iid >= uint_metadata.num_bodies {
         out.pos = vec4<f32>(2.0, 2.0, 0.0, 1.0); // off-screen
         out.uv = vec2<f32>(0.0);
@@ -67,7 +70,7 @@ fn vertex_main(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u3
     var radius_px: f32 = 0.65;
     if iid == 0u {
         // make user-controlled body slightly larger
-        radius_px = 2.0;
+        radius_px = 4.0;
     }
     let px_to_ndc = 2.0 / float_metadata.viewport;
     let radius_ndc = radius_px * px_to_ndc;
@@ -93,6 +96,10 @@ fn fragment_main(in: VSOut) -> @location(0) vec4<f32> {
 
     // base color
     let color = vec3<f32>(0.85, 0.88, 0.95);
+    if in.is_user_body == 1u {
+        // user-controlled body color
+        return vec4<f32>(0.9, 0.4, 0.3, alpha);
+    }
 
     return vec4<f32>(0.5 * color, alpha);
 }
