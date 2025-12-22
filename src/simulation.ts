@@ -45,7 +45,7 @@ export class Simulation implements GPUCommandSource {
 
         // set up GPU buffers, pipelines, and bind groups
         this.buffers = createSimBuffers(this.device, this.config, this.camCenter, this.camHalfSize, this.viewPort);
-        this.pipelines = createSimPipelines(this.device, this.buffers);
+        this.pipelines = createSimPipelines(this.device, this.config, this.buffers);
         this.bindGroups = createSimBindGroups(this.device, this.buffers, this.pipelines);
     }
 

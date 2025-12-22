@@ -4,6 +4,7 @@ import lbvhShaderCode from "./shaders/lbvh.wgsl?raw";
 // @ts-ignore
 import { RadixSortKernel } from 'webgpu-radix-sort';
 import type { SimBuffers } from "./buffers";
+import type { SimConfig } from "./config";
 
 
 // SIM PIPELINES
@@ -16,7 +17,7 @@ export type SimPipelines = {
     sortMortonCodes: any;
 };
 
-export function createSimPipelines(device: GPUDevice, buffers: SimBuffers): SimPipelines {
+export function createSimPipelines(device: GPUDevice, config: SimConfig, buffers: SimBuffers): SimPipelines {
     const physicsShaderModule = device.createShaderModule({
         code: physicsShaderCode,
     });
@@ -52,7 +53,7 @@ export function createSimPipelines(device: GPUDevice, buffers: SimBuffers): SimP
         device: device,
         keys: buffers.mortonCodes,
         values: buffers.indices,
-        count: buffers.mortonCodes.size / 4,
+        count: config.numBodies,
         check_order: false,
         bit_count: 32,
         workgroup_size: { x: 16, y: 16 },
