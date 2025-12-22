@@ -45,7 +45,7 @@ export class Simulation implements GPUCommandSource {
 
         // set up GPU buffers, pipelines, and bind groups
         this.buffers = createSimBuffers(this.device, this.config, this.camCenter, this.camHalfSize, this.viewPort);
-        this.pipelines = createSimPipelines(this.device);
+        this.pipelines = createSimPipelines(this.device, this.buffers);
         this.bindGroups = createSimBindGroups(this.device, this.buffers, this.pipelines);
     }
 
@@ -61,7 +61,10 @@ export class Simulation implements GPUCommandSource {
             computePass.setPipeline(this.pipelines.computeMortonStep);
             computePass.setBindGroup(0, this.bindGroups.computeMortonStep);
             computePass.dispatchWorkgroups(dispatchCount);
-            
+
+            // sort morton codes and indices step
+            this.pipelines.sortMortonCodes.dispatch(computePass);
+
             // half velocity step
             computePass.setPipeline(this.pipelines.halfVelStep);
             computePass.setBindGroup(0, this.bindGroups.halfVelStep);

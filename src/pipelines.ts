@@ -1,6 +1,9 @@
 import physicsShaderCode from "./shaders/physics.wgsl?raw";
 import renderShaderCode from "./shaders/render.wgsl?raw";
 import lbvhShaderCode from "./shaders/lbvh.wgsl?raw";
+// @ts-ignore
+import { RadixSortKernel } from 'webgpu-radix-sort';
+import type { SimBuffers } from "./buffers";
 
 
 // SIM PIPELINES
@@ -10,9 +13,10 @@ export type SimPipelines = {
     halfVelStep: GPUComputePipeline;
     posStep: GPUComputePipeline;
     computeMortonStep: GPUComputePipeline;
+    sortMortonCodes: any;
 };
 
-export function createSimPipelines(device: GPUDevice): SimPipelines {
+export function createSimPipelines(device: GPUDevice, buffers: SimBuffers): SimPipelines {
     const physicsShaderModule = device.createShaderModule({
         code: physicsShaderCode,
     });
@@ -44,12 +48,23 @@ export function createSimPipelines(device: GPUDevice): SimPipelines {
         },
     });
 
+    const radixSortKernel = new RadixSortKernel({
+        device: device,
+        keys: buffers.mortonCodes,
+        values: buffers.indices,
+        count: buffers.mortonCodes.size / 4,
+        check_order: false,
+        bit_count: 32,
+        workgroup_size: { x: 16, y: 16 },
+    })
+
     return {
         physicsShaderModule: physicsShaderModule,
         lbvhShaderModule: lbvhShaderModule,
         halfVelStep: halfVelocityStepPipeline,
         posStep: posStepPipeline,
         computeMortonStep: computeMortonStepPipeline,
+        sortMortonCodes: radixSortKernel,
     };
 }
 
