@@ -127,7 +127,7 @@ export function createSimBuffers(device: GPUDevice, config: SimConfig, camCenter
 
 export function buildMetadataArrays(config: SimConfig, camCenter: [number, number], camHalfSize: [number, number], viewPort: [number, number]): { uintMetadataArray: Uint32Array; floatMetadataArray: Float32Array } {
     const uintMetadataArray = new Uint32Array([config.numBodies]);
-    const floatMetadataArray = new Float32Array([config.gravConstant, config.deltaTime, config.epsilonMultiplier, 0.0, ...camCenter, ...camHalfSize, ...viewPort]);
+    const floatMetadataArray = new Float32Array([config.gravConstant, config.deltaTime, config.epsilonMultiplier, config.bhTheta, ...camCenter, ...camHalfSize, ...viewPort]);
     return { uintMetadataArray, floatMetadataArray };
 }
 

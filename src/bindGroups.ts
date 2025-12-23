@@ -9,6 +9,8 @@ export type SimBindGroups = Readonly<{
     computeMortonStep: GPUBindGroup;
     buildLBVHStep: GPUBindGroup;
     fillLBVHStep: GPUBindGroup;
+    barnesHutVelStep: GPUBindGroup;
+    barnesHutPosStep: GPUBindGroup;
 }>;
 
 export function createSimBindGroups(device: GPUDevice, buffers: SimBuffers, pipelines: SimPipelines): SimBindGroups {
@@ -35,7 +37,7 @@ export function createSimBindGroups(device: GPUDevice, buffers: SimBuffers, pipe
     });
 
     const computeMortonStepBindGroup = device.createBindGroup({
-        layout: pipelines.computeMortonStep.getBindGroupLayout(0),
+        layout: pipelines.computeMorton.getBindGroupLayout(0),
         entries: [
             { binding: 1, resource: { buffer: buffers.uintMetadata } },
             { binding: 2, resource: { buffer: buffers.pos } },
@@ -66,12 +68,37 @@ export function createSimBindGroups(device: GPUDevice, buffers: SimBuffers, pipe
         ]
     });
 
+    const barnesHutVelStepBindGroup = device.createBindGroup({
+        layout: pipelines.barnesHutVelStep.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: { buffer: buffers.floatMetadata } },
+            { binding: 1, resource: { buffer: buffers.uintMetadata } },
+            { binding: 2, resource: { buffer: buffers.pos } },
+            { binding: 3, resource: { buffer: buffers.vel } },
+            { binding: 4, resource: { buffer: buffers.mass } },
+            { binding: 5, resource: { buffer: buffers.bodyIndices } },
+            { binding: 6, resource: { buffer: buffers.nodeData } },
+        ]
+    });
+
+    const barnesHutPosStepBindGroup = device.createBindGroup({
+        layout: pipelines.barnesHutPosStep.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: { buffer: buffers.floatMetadata } },
+            { binding: 1, resource: { buffer: buffers.uintMetadata } },
+            { binding: 2, resource: { buffer: buffers.pos } },
+            { binding: 3, resource: { buffer: buffers.vel } },
+        ]
+    });
+
     return {
         halfVelStep: halfVelStepBindGroup,
         posStep: posStepBindGroup,
         computeMortonStep: computeMortonStepBindGroup,
         buildLBVHStep: buildLBVHBindGroup,
         fillLBVHStep: fillLBVHBindGroup,
+        barnesHutVelStep: barnesHutVelStepBindGroup,
+        barnesHutPosStep: barnesHutPosStepBindGroup,
     };
 }
 

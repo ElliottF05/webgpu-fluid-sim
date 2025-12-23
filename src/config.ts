@@ -1,8 +1,7 @@
 export type SimConfig = Readonly<{
     numBodies: number;
     gravConstant: number;
-    maxMass: number;
-    minStepsPerOrbit: number;
+    bhTheta: number;
     substeps: number;
     viewPort: [number, number];
     deltaTime: number;
@@ -10,10 +9,9 @@ export type SimConfig = Readonly<{
 }>;
 
 export function getDefaultSimConfig(canvas: HTMLCanvasElement): SimConfig {
-    const numBodies = 2000;
+    const numBodies = 8000;
     const gravConstant = 1.0;
-    const maxMass = 1.0;
-    const minStepsPerOrbit = 50;
+    const bhTheta = 0.5;
     const substeps = 10;
     const viewPort: [number, number] = [canvas.width, canvas.height];
     const deltaTime = 0.1 * 1.0 / (60.0 * substeps);
@@ -22,8 +20,7 @@ export function getDefaultSimConfig(canvas: HTMLCanvasElement): SimConfig {
     return {
         numBodies,
         gravConstant,
-        maxMass,
-        minStepsPerOrbit,
+        bhTheta,
         substeps,
         viewPort,
         deltaTime,

@@ -1,6 +1,7 @@
 import physicsShaderCode from "./shaders/physics.wgsl?raw";
 import renderShaderCode from "./shaders/render.wgsl?raw";
 import lbvhShaderCode from "./shaders/lbvh.wgsl?raw";
+import barnesHutShaderCode from "./shaders/barnes_hut.wgsl?raw";
 // @ts-ignore
 import { RadixSortKernel } from 'webgpu-radix-sort';
 import type { SimBuffers } from "./buffers";
@@ -11,12 +12,15 @@ import type { SimConfig } from "./config";
 export type SimPipelines = {
     physicsShaderModule: GPUShaderModule;
     lbvhShaderModule: GPUShaderModule;
+    barnesHutShaderModule: GPUShaderModule;
     halfVelStep: GPUComputePipeline;
     posStep: GPUComputePipeline;
-    computeMortonStep: GPUComputePipeline;
+    computeMorton: GPUComputePipeline;
     sortMortonCodes: any;
     buildLBVH: GPUComputePipeline;
     fillLBVH: GPUComputePipeline;
+    barnesHutVelStep: GPUComputePipeline;
+    barnesHutPosStep: GPUComputePipeline;
 };
 
 export function createSimPipelines(device: GPUDevice, config: SimConfig, buffers: SimBuffers): SimPipelines {
@@ -25,6 +29,9 @@ export function createSimPipelines(device: GPUDevice, config: SimConfig, buffers
     });
     const lbvhShaderModule = device.createShaderModule({
         code: lbvhShaderCode,
+    });
+    const barnesHutShaderModule = device.createShaderModule({
+        code: barnesHutShaderCode,
     });
 
     const halfVelocityStepPipeline = device.createComputePipeline({
@@ -77,15 +84,34 @@ export function createSimPipelines(device: GPUDevice, config: SimConfig, buffers
         },
     });
 
+    const barnesHutVelStepPipeline = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+            module: barnesHutShaderModule,
+            entryPoint: "bh_vel_step_main",
+        },
+    });
+
+    const barnesHutPosStepPipeline = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+            module: barnesHutShaderModule,
+            entryPoint: "bh_pos_step_main",
+        },
+    });
+
     return {
         physicsShaderModule: physicsShaderModule,
         lbvhShaderModule: lbvhShaderModule,
+        barnesHutShaderModule: barnesHutShaderModule,
         halfVelStep: halfVelocityStepPipeline,
         posStep: posStepPipeline,
-        computeMortonStep: computeMortonStepPipeline,
+        computeMorton: computeMortonStepPipeline,
         sortMortonCodes: radixSortKernel,
         buildLBVH: buildLBVHPipeline,
         fillLBVH: fillLBVHPipeline,
+        barnesHutVelStep: barnesHutVelStepPipeline,
+        barnesHutPosStep: barnesHutPosStepPipeline,
     };
 }
 

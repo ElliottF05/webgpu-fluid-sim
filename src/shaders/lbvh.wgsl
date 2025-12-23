@@ -1,4 +1,4 @@
-// METADATA STRUCTS
+// STRUCTS
 
 struct FloatMetadata {
     grav_constant: f32,
@@ -90,7 +90,7 @@ fn delta(i: i32, j: i32) -> i32 {
 fn build_lbvh_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // this exactly follows figure 4 in
     // https://developer.nvidia.com/blog/parallelforall/wp-content/uploads/2012/11/karras2012hpg_paper.pdf
-    
+
     let i_u = global_id.x;
     let i = i32(i_u);
     let n = uint_metadata.num_bodies;

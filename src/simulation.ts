@@ -58,7 +58,7 @@ export class Simulation implements GPUCommandSource {
 
         for (let step = 0; step < this.config.substeps; step++) {
             // compute morton codes step
-            computePass.setPipeline(this.pipelines.computeMortonStep);
+            computePass.setPipeline(this.pipelines.computeMorton);
             computePass.setBindGroup(0, this.bindGroups.computeMortonStep);
             computePass.dispatchWorkgroups(dispatchCount);
 
@@ -75,20 +75,31 @@ export class Simulation implements GPUCommandSource {
             computePass.setBindGroup(0, this.bindGroups.fillLBVHStep);
             computePass.dispatchWorkgroups(dispatchCount);
 
-            // half velocity step
-            computePass.setPipeline(this.pipelines.halfVelStep);
-            computePass.setBindGroup(0, this.bindGroups.halfVelStep);
+            // barnes-hut velocity step
+            computePass.setPipeline(this.pipelines.barnesHutVelStep);
+            computePass.setBindGroup(0, this.bindGroups.barnesHutVelStep);
             computePass.dispatchWorkgroups(dispatchCount);
 
-            // position step
-            computePass.setPipeline(this.pipelines.posStep);
-            computePass.setBindGroup(0, this.bindGroups.posStep);
+            // barnes-hut position step
+            computePass.setPipeline(this.pipelines.barnesHutPosStep);
+            computePass.setBindGroup(0, this.bindGroups.barnesHutPosStep);
             computePass.dispatchWorkgroups(dispatchCount);
 
-            // half velocity step
-            computePass.setPipeline(this.pipelines.halfVelStep);
-            computePass.setBindGroup(0, this.bindGroups.halfVelStep);
-            computePass.dispatchWorkgroups(dispatchCount);
+
+            // // half velocity step
+            // computePass.setPipeline(this.pipelines.halfVelStep);
+            // computePass.setBindGroup(0, this.bindGroups.halfVelStep);
+            // computePass.dispatchWorkgroups(dispatchCount);
+
+            // // position step
+            // computePass.setPipeline(this.pipelines.posStep);
+            // computePass.setBindGroup(0, this.bindGroups.posStep);
+            // computePass.dispatchWorkgroups(dispatchCount);
+
+            // // half velocity step
+            // computePass.setPipeline(this.pipelines.halfVelStep);
+            // computePass.setBindGroup(0, this.bindGroups.halfVelStep);
+            // computePass.dispatchWorkgroups(dispatchCount);
         }
 
         computePass.end();
