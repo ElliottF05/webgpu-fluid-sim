@@ -14,6 +14,18 @@ struct UintMetadata {
     num_bodies: u32,
 }
 
+struct NodeData {
+    center_of_mass: vec2<f32>,
+    aabb_min: vec2<f32>,
+    aabb_max: vec2<f32>,
+    total_mass: f32,
+    length: f32,
+    left_child: u32,
+    right_child: u32,
+    parent: u32,
+    _pad: u32,
+}
+
 
 // BINDINGS AND BUFFERS
 
@@ -22,14 +34,13 @@ struct UintMetadata {
 @group(0) @binding(1) var<uniform> uint_metadata: UintMetadata;
 
 // data buffers
-@group(0) @binding(2) var<storage, read> pos_buf: array<vec2<f32>>;
-@group(0) @binding(3) var<storage, read_write> morton_codes: array<u32>;
-@group(0) @binding(4) var<storage, read_write> indices: array<u32>;
+@group(0) @binding(2) var<storage, read_write> pos_buf: array<vec2<f32>>;
+@group(0) @binding(3) var<storage, read_write> mass_buf: array<f32>;
+@group(0) @binding(4) var<storage, read_write> morton_codes: array<u32>;
+@group(0) @binding(5) var<storage, read_write> body_indices: array<u32>;
 
-
-// HELPER FUNCTIONS
-// none for now
-
+@group(0) @binding(6) var<storage, read_write> node_data: array<NodeData>;
+@group(0) @binding(7) var<storage, read_write> node_status: array<atomic<u32>>;
 
 
 @compute @workgroup_size(64)
@@ -46,17 +57,218 @@ fn compute_morton_codes_main(@builtin(global_invocation_id) global_id: vec3<u32>
     var uv = (pos + vec2<f32>(half)) / vec2<f32>(scale); // map from [-half, half] to [0,1]
     uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)); // clamp to [0, 1]
 
-    let x = min(u32(round(uv.x * 65535.0)), 65535u); // 16 bits
-    let y = min(u32(round(uv.y * 65535.0)), 65535u); // 16 bits
+    let x = min(u32(uv.x * 65535.0 + 0.5), 65535u); // 16 bits
+    let y = min(u32(uv.y * 65535.0 + 0.5), 65535u); // 16 bits
 
     var morton_code = 0u;
     for (var bit = 0u; bit < 16u; bit += 1u) {
         let mask = 1u << bit;
-        let bit_x = ((x & mask) >> bit) << (2 * bit);
-        let bit_y = ((y & mask) >> bit) << (2 * bit + 1);
+        let bit_x = ((x & mask) >> bit) << (2u * bit);
+        let bit_y = ((y & mask) >> bit) << (2u * bit + 1u);
         morton_code = morton_code | bit_x | bit_y;
     }
 
     morton_codes[i] = morton_code;
-    indices[i] = i;
+    body_indices[i] = i;
+}
+
+
+fn delta(i: i32, j: i32) -> i32 {
+    if j < 0 || j >= i32(uint_metadata.num_bodies) {
+        return -1;
+    }
+    let a = morton_codes[u32(i)];
+    let b = morton_codes[u32(j)];
+    if a == b {
+        // tie break using indices
+        return 32 + i32(countLeadingZeros(u32(i) ^ u32(j)));
+    }
+    return i32(countLeadingZeros(a ^ b));
+}
+
+fn determine_range(i_u: u32) -> vec2<u32> {
+    let n_u = uint_metadata.num_bodies;
+    let n = i32(n_u);
+    let i = i32(i_u);
+
+    // choose direction d
+    let d_left = delta(i, i - 1);
+    let d_right = delta(i, i + 1);
+    let d: i32 = select(-1, 1, d_right > d_left);
+
+    let delta_min = delta(i, i - d); // get common prefix length in direction we're not expanding towards
+
+    // exponential search to find upper bound for the length of the range
+    var l_max: i32 = 2;
+    while delta(i, i + d * l_max) > delta_min {
+        l_max = l_max * 2;
+    }
+
+    // binary search to find the exact end of the range
+    var l: i32 = 0;
+    var step: i32 = l_max;
+    while step > 1 {
+        step = (step + 1) / 2;
+        let j = i + d * (l + step);
+        if delta(i, j) > delta_min {
+            l = l + step;
+        }
+    }
+
+    let j = i + d * l;
+
+    let first = min(i, j);
+    let last = max(i, j);
+    return vec2<u32>(u32(first), u32(last));
+}
+
+fn find_split(first: u32, last: u32) -> u32 {
+    let first_code = morton_codes[first];
+    let last_code = morton_codes[last];
+
+    // split in middle if identical morton codes
+    if first_code == last_code {
+        return (first + last) >> 1u;
+    }
+
+    // find number of leading identical bits
+    let delta_node = delta(i32(first), i32(last));
+
+    // binary search to find the split point (greatest index where prefix is > common_prefix)
+    var split = first;
+    var step = last - first;
+    loop {
+        step = (step + 1u) >> 1u;
+        let new_split = split + step;
+        if new_split < last {
+            let split_code = morton_codes[new_split];
+            let delta_split = delta(i32(first), i32(new_split));
+            if delta_split > delta_node {
+                split = new_split;
+            }
+        }
+        if step <= 1u {
+            break;
+        }
+    }
+
+    return split;
+}
+
+@compute @workgroup_size(64)
+fn build_lbvh_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let i = global_id.x;
+    let n = uint_metadata.num_bodies;
+
+    // internal nodes are indexed [0, n-2], leaves are [n-1, 2n-2]
+    if i >= n - 1u {
+        return;
+    }
+
+    // find which range of bodies this internal node covers
+    let range = determine_range(i);
+    let first = range.x;
+    let last = range.y;
+
+    // find where to split this range
+    let split = find_split(first, last);
+
+    // get left child
+    if split == first { // child is leaf node
+        node_data[i].left_child = (n - 1u) + split;
+    } else {
+        node_data[i].left_child = split;
+    }
+
+    // get right child
+    if split + 1u == last { // child is leaf node
+        node_data[i].right_child = (n - 1u) + (split + 1u);
+    } else {  
+        node_data[i].right_child = split + 1u;
+    }
+
+    // set parent pointers
+    let left_idx = node_data[i].left_child;
+    let right_idx = node_data[i].right_child;
+    node_data[left_idx].parent = i;
+    node_data[right_idx].parent = i;
+
+    // set to unvisited
+    atomicStore(&node_status[i], 0u);
+}
+
+
+@compute @workgroup_size(64)
+fn fill_lbvh_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let n = uint_metadata.num_bodies;
+    var curr_idx = (n - 1u) + global_id.x; // leaves are indexed [n-1, 2n-2]
+
+    if curr_idx < (n - 1u) || curr_idx >= (2u * n - 1u) {
+        return;
+    }
+
+    // initialize leaf node data
+    let body_idx = body_indices[curr_idx - (n - 1u)];
+    let mass = mass_buf[body_idx];
+    let pos = pos_buf[body_idx];
+
+    node_data[curr_idx].total_mass = mass;
+    node_data[curr_idx].center_of_mass = pos;
+    node_data[curr_idx].aabb_min = pos;
+    node_data[curr_idx].aabb_max = pos;
+    node_data[curr_idx].length = 0.0;
+
+
+    // propagate up the tree
+    var count = 0u;
+    while curr_idx != 0u {
+        count = count + 1u;
+        if count > 2000u {
+            break; // prevent infinite loops
+        }
+        let parent_idx = node_data[curr_idx].parent;
+
+        if parent_idx == curr_idx {
+            break; // reached root
+        }
+        if parent_idx >= (n - 1u) {
+            break; // should not happen, but just in case
+        }
+
+        // attempt to acquire lock on parent
+        let prev_status = atomicAdd(&node_status[parent_idx], 1u);
+        if prev_status == 0u {
+            // we are the first to arrive at this parent so break
+            break;
+        }
+
+        // we are the second to arrive at this parent, so we can compute its data
+        let left_idx = node_data[parent_idx].left_child;
+        let right_idx = node_data[parent_idx].right_child;
+
+        let left_data = node_data[left_idx];
+        let right_data = node_data[right_idx];
+
+        // combine AABBs
+        node_data[parent_idx].aabb_min = min(left_data.aabb_min, right_data.aabb_min);
+        node_data[parent_idx].aabb_max = max(left_data.aabb_max, right_data.aabb_max);
+
+        // combine masses and centers of mass
+        let total_mass = left_data.total_mass + right_data.total_mass;
+        node_data[parent_idx].total_mass = total_mass;
+        if total_mass > 0.0 {
+            node_data[parent_idx].center_of_mass =
+                (left_data.center_of_mass * left_data.total_mass +
+                 right_data.center_of_mass * right_data.total_mass) / total_mass;
+        } else {
+            node_data[parent_idx].center_of_mass = vec2<f32>(0.0);
+        }
+
+        // compute length of longest side of AABB
+        let aabb_size = node_data[parent_idx].aabb_max - node_data[parent_idx].aabb_min;
+        node_data[parent_idx].length = max(aabb_size.x, aabb_size.y);
+
+        // move up the tree
+        curr_idx = parent_idx;
+    }
 }

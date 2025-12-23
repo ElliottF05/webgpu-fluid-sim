@@ -65,6 +65,16 @@ export class Simulation implements GPUCommandSource {
             // sort morton codes and indices step
             this.pipelines.sortMortonCodes.dispatch(computePass);
 
+            // build LBVH step
+            computePass.setPipeline(this.pipelines.buildLBVH);
+            computePass.setBindGroup(0, this.bindGroups.buildLBVHStep);
+            computePass.dispatchWorkgroups(dispatchCount);
+
+            // fill LBVH step
+            computePass.setPipeline(this.pipelines.fillLBVH);
+            computePass.setBindGroup(0, this.bindGroups.fillLBVHStep);
+            computePass.dispatchWorkgroups(dispatchCount);
+
             // half velocity step
             computePass.setPipeline(this.pipelines.halfVelStep);
             computePass.setBindGroup(0, this.bindGroups.halfVelStep);

@@ -28,7 +28,9 @@ export type SimBuffers = {
     pos: GPUBuffer;
     vel: GPUBuffer;
     mortonCodes: GPUBuffer;
-    indices: GPUBuffer;
+    bodyIndices: GPUBuffer;
+    nodeData: GPUBuffer;
+    nodeStatus: GPUBuffer;
 };
 
 export function createSimBuffers(device: GPUDevice, config: SimConfig, camCenter: [number, number], camHalfSize: [number, number], viewPort: [number, number]): SimBuffers {
@@ -69,8 +71,27 @@ export function createSimBuffers(device: GPUDevice, config: SimConfig, camCenter
     const mortonCodesBuffer = createBuffer(device, mortonCodesArray);
 
     // indices buffer
-    const indicesArray = new Uint32Array(config.numBodies).map((_v, i) => i);
-    const indicesBuffer = createBuffer(device, indicesArray);
+    const bodyIndicesArray = new Uint32Array(config.numBodies).map((_v, i) => i);
+    const bodyIndicesBuffer = createBuffer(device, bodyIndicesArray);
+
+    // node data buffer (each node_data is 12 * 4 = 48 bytes):
+    // struct NodeData {
+    //     center_of_mass: vec2<f32>,
+    //     aabb_min: vec2<f32>,
+    //     aabb_max: vec2<f32>,
+    //     total_mass: f32,
+    //     length: f32,
+    //     left_child: u32,
+    //     right_child: u32,
+    //     parent: u32,
+    //     _pad: u32,
+    // }
+    const numNodes = 2 * config.numBodies - 1;
+    const nodeDataArray = new Uint32Array(numNodes * 12).fill(0.0);
+    const nodeDataBuffer = createBuffer(device, nodeDataArray);
+
+    const nodeStatusArray = new Uint32Array(numNodes).fill(0);
+    const nodeStatusBuffer = createBuffer(device, nodeStatusArray);
 
     return {
         floatMetadata: floatMetadataBuffer,
@@ -79,7 +100,9 @@ export function createSimBuffers(device: GPUDevice, config: SimConfig, camCenter
         pos: posBuffer,
         vel: velBuffer,
         mortonCodes: mortonCodesBuffer,
-        indices: indicesBuffer,
+        bodyIndices: bodyIndicesBuffer,
+        nodeData: nodeDataBuffer,
+        nodeStatus: nodeStatusBuffer,
     };
 }
 

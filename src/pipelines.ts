@@ -15,6 +15,8 @@ export type SimPipelines = {
     posStep: GPUComputePipeline;
     computeMortonStep: GPUComputePipeline;
     sortMortonCodes: any;
+    buildLBVH: GPUComputePipeline;
+    fillLBVH: GPUComputePipeline;
 };
 
 export function createSimPipelines(device: GPUDevice, config: SimConfig, buffers: SimBuffers): SimPipelines {
@@ -52,12 +54,28 @@ export function createSimPipelines(device: GPUDevice, config: SimConfig, buffers
     const radixSortKernel = new RadixSortKernel({
         device: device,
         keys: buffers.mortonCodes,
-        values: buffers.indices,
+        values: buffers.bodyIndices,
         count: config.numBodies,
         check_order: false,
         bit_count: 32,
         workgroup_size: { x: 16, y: 16 },
     })
+
+    const buildLBVHPipeline = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+            module: lbvhShaderModule,
+            entryPoint: "build_lbvh_main",
+        },
+    });
+
+    const fillLBVHPipeline = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+            module: lbvhShaderModule,
+            entryPoint: "fill_lbvh_main",
+        },
+    });
 
     return {
         physicsShaderModule: physicsShaderModule,
@@ -66,6 +84,8 @@ export function createSimPipelines(device: GPUDevice, config: SimConfig, buffers
         posStep: posStepPipeline,
         computeMortonStep: computeMortonStepPipeline,
         sortMortonCodes: radixSortKernel,
+        buildLBVH: buildLBVHPipeline,
+        fillLBVH: fillLBVHPipeline,
     };
 }
 
