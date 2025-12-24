@@ -1,4 +1,4 @@
-import { readBufferData } from "./buffers";
+// import { readBufferData } from "./buffers";
 import { initDeviceAndContext } from "./gpu";
 import { InteractionController } from "./interaction";
 import { Renderer } from "./renderer";
