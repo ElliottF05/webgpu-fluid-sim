@@ -82,7 +82,7 @@ export function createSimBuffers(device: GPUDevice, config: SimConfig, camCenter
         initVelArray[2 * i] = x;
         initVelArray[2 * i + 1] = y;
     }
-    initVelArray[3] = 20.0;
+    // initVelArray[3] = 20.0;
     const velBuffer = createBuffer(device, initVelArray);
 
     // morton codes buffer

@@ -9,7 +9,7 @@ export type SimConfig = Readonly<{
 }>;
 
 export function getDefaultSimConfig(canvas: HTMLCanvasElement): SimConfig {
-    const numBodies = 100000;
+    const numBodies = 250000;
     const gravConstant = 1.0;
     const bhTheta = 0.6;
     const substeps = 1;
