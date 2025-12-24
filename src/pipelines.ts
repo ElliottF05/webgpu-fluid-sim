@@ -1,6 +1,6 @@
-import renderShaderCode from "./shaders/render.wgsl?raw";
-import lbvhShaderCode from "./shaders/lbvh.wgsl?raw";
-import barnesHutShaderCode from "./shaders/barnes_hut.wgsl?raw";
+import renderShaderCode from "./shaders/render/render.wgsl?raw";
+import lbvhShaderCode from "./shaders/compute/lbvh.wgsl?raw";
+import barnesHutShaderCode from "./shaders/compute/barnes_hut.wgsl?raw";
 // @ts-ignore
 import { RadixSortKernel } from 'webgpu-radix-sort';
 import type { Simulation } from "./simulation";

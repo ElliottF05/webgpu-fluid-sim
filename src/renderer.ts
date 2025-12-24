@@ -33,6 +33,22 @@ export class Renderer implements GPUCommandSource {
     public getCommands(): GPUCommandBuffer {
         const commandEncoder = this.device.createCommandEncoder();
         const textureView = this.context.getCurrentTexture().createView();
+
+        // first pass: fill density texture
+        // const densityPass = commandEncoder.beginRenderPass({
+        //     colorAttachments: [
+        //     {
+        //         view: this.buffers.densityTex.createView(),
+        //         clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        //         loadOp: "clear",
+        //         storeOp: "store",
+        //     },
+        //     ],
+        // })
+        // set pipelines etc
+
+
+        // second pass: render to screen from density texture
         const renderPass = commandEncoder.beginRenderPass({
             colorAttachments: [
             {
@@ -43,7 +59,6 @@ export class Renderer implements GPUCommandSource {
             },
             ],
         });
-
         renderPass.setPipeline(this.pipelines.render);
         renderPass.setBindGroup(0, this.bindGroups.render);
         renderPass.draw(6, this.sim.getNumBodies(), 0, 0);
