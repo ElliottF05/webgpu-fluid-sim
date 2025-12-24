@@ -50,18 +50,20 @@ fn is_leaf(node_index: u32, n: u32) -> bool {
 
 @compute @workgroup_size(64)
 fn bh_vel_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let i = global_id.x;
+    let thread_idx = global_id.x;
     let n = uint_metadata.num_bodies;
-    if i >= n {
+    if thread_idx >= n {
         return;
     }
+
+    let body_idx = body_indices[thread_idx];
 
     let g = float_metadata.grav_constant;
     let dt = float_metadata.delta_time;
     let theta = float_metadata.bh_theta;
 
-    let pos1 = pos_buf[i];
-    let m1 = mass_buf[i];
+    let pos1 = pos_buf[body_idx];
+    let m1 = mass_buf[body_idx];
 
     var accel = vec2<f32>(0.0, 0.0);
 
@@ -72,8 +74,8 @@ fn bh_vel_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     while stack_ptr >= 0 {
 
-        let node_index = stack[stack_ptr];
-        let node = node_data[node_index];
+        let node_idx = stack[stack_ptr];
+        let node = node_data[node_idx];
         stack_ptr -= 1;
 
         let pos2 = node.center_of_mass;
@@ -81,9 +83,9 @@ fn bh_vel_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         
         let r = pos2 - pos1;
         let dist_squared = dot(r, r);
-        if is_leaf(node_index, n) {
-            let body_index = body_indices[node_index - (n - 1u)];
-            if body_index == i {
+        if is_leaf(node_idx, n) {
+            let leaf_body_idx = body_indices[node_idx - (n - 1u)];
+            if leaf_body_idx == body_idx {
                 continue;
             }
         }
@@ -92,7 +94,7 @@ fn bh_vel_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let eps = float_metadata.epsilon_multiplier * sqrt(g * m_eff * dt);
         let inv_denom = inverseSqrt(dist_squared + eps * eps);
 
-        if is_leaf(node_index, n) || node.length * inv_denom < theta {
+        if is_leaf(node_idx, n) || node.length * inv_denom < theta {
             // treat as single body
             let inv_denom_3 = inv_denom * inv_denom * inv_denom;
             accel += g * m2 * r * inv_denom_3;
@@ -108,14 +110,15 @@ fn bh_vel_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     // update velocity
-    vel_buf[i] = vel_buf[i] + accel * dt;
+    vel_buf[body_idx] = vel_buf[body_idx] + accel * dt;
 }
 
 @compute @workgroup_size(64)
 fn bh_pos_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let i = global_id.x;
-    if i >= uint_metadata.num_bodies {
+    let thread_idx = global_id.x;
+    if thread_idx >= uint_metadata.num_bodies {
         return;
     }
-    pos_buf[i] = pos_buf[i] + vel_buf[i] * float_metadata.delta_time;
+    let body_idx = body_indices[thread_idx];
+    pos_buf[body_idx] = pos_buf[body_idx] + vel_buf[body_idx] * float_metadata.delta_time;
 }

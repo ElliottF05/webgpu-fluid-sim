@@ -34,6 +34,10 @@ async function main() {
             sim.getCommands(),
             renderer.getCommands(),
         ]);
+
+        device.queue.onSubmittedWorkDone().then(() => {
+            console.log(`Frame time: ${(performance.now() - now).toFixed(2)} ms`);
+        });
     }
 
     requestAnimationFrame(frame);
