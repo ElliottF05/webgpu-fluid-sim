@@ -4,7 +4,7 @@ import { InteractionController } from "./interaction";
 import { Renderer } from "./renderer";
 import { Simulation } from "./simulation";
 
-const TARGET_FPS = 30;
+const TARGET_FPS = 60;
 const FRAME_DURATION_MS = 1000.0 / TARGET_FPS;
 
 export interface GPUCommandSource {
@@ -34,7 +34,7 @@ async function main() {
             renderer.getCommands(),
         ]);
     }
-    
+
     requestAnimationFrame(frame);
 }
 
