@@ -45,7 +45,7 @@ export class Renderer implements GPUCommandSource {
         });
         densityPass.setPipeline(this.pipelines.density);
         densityPass.setBindGroup(0, this.bindGroups.density);
-        densityPass.draw(6, this.sim.getNumBodies(), 0, 0); // check arguments
+        densityPass.draw(6, this.sim.getNumBodies(), 0, 0);
         densityPass.end();
 
 
@@ -62,7 +62,7 @@ export class Renderer implements GPUCommandSource {
         });
         renderPass.setPipeline(this.pipelines.toneMap);
         renderPass.setBindGroup(0, this.bindGroups.toneMap);
-        renderPass.draw(); // what should the arguments be?
+        renderPass.draw(3, 1, 0, 0);
         renderPass.end();
 
         return commandEncoder.finish();

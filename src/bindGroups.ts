@@ -92,7 +92,6 @@ export function createRenderBindGroups(device: GPUDevice, buffers: RenderBuffers
             { binding: 0, resource: buffers.floatMetadata },
             { binding: 1, resource: buffers.uintMetadata },
             { binding: 2, resource: buffers.pos },
-            { binding: 3, resource: buffers.densityTextureView },
         ],
     });
 
@@ -100,9 +99,8 @@ export function createRenderBindGroups(device: GPUDevice, buffers: RenderBuffers
     const toneMapBindGroup = device.createBindGroup({
         layout: pipelines.toneMap.getBindGroupLayout(0),
         entries: [
-            { binding: 0, resource: buffers.floatMetadata },
-            { binding: 1, resource: buffers.uintMetadata },
-            { binding: 3, resource: buffers.densityTextureView },
+            { binding: 2, resource: buffers.densityTextureView },
+            { binding: 3, resource: buffers.densityTextureSampler },
         ],
     });
 

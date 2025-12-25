@@ -42,7 +42,7 @@ export class InteractionController {
 
         // normalized to [-1,1]
         const u = (2 * px / rect.width) - 1;
-        const v = -((2 * py / rect.height) - 1);
+        const v = (2 * py / rect.height) - 1;
 
         // to world pos
         const worldX = u * camHalfSizeX + camCenterX;
@@ -130,7 +130,7 @@ export class InteractionController {
                 const worldPerPixelY = (2 * camHalfSize[1]) / rect.height;
 
                 camCenter[0] -= dxPixels * worldPerPixelX;
-                camCenter[1] += dyPixels * worldPerPixelY
+                camCenter[1] -= dyPixels * worldPerPixelY
             }
         });
 

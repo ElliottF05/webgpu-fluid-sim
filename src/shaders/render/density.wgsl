@@ -94,7 +94,7 @@ fn fragment_main(in: VSOut) -> @location(0) vec4<f32> {
 
     // compensate for zoom by reducing per-pixel contribution when zoomed out
     let zoom = max(float_metadata.cam_half_size.x, float_metadata.cam_half_size.y);
-    let zoom_scale = 1.0 / (1.0 + 0.05 * zoom);
+    let zoom_scale = 1.0 / (1.0 + 0.05 * zoom); // tweak 0.05 to adjust falloff speed
 
     let base = 0.02; // change this to adjust overall brightness
 
