@@ -1,6 +1,7 @@
-import renderShaderCode from "./shaders/render/render.wgsl?raw";
 import lbvhShaderCode from "./shaders/compute/lbvh.wgsl?raw";
 import barnesHutShaderCode from "./shaders/compute/barnes_hut.wgsl?raw";
+import densityShaderCode from "./shaders/render/density.wgsl?raw";
+import toneMapShaderCode from "./shaders/render/tonemap.wgsl?raw";
 // @ts-ignore
 import { RadixSortKernel } from 'webgpu-radix-sort';
 import type { Simulation } from "./simulation";
@@ -91,31 +92,55 @@ export function createSimPipelines(device: GPUDevice, sim: Simulation): SimPipel
 
 // RENDER PIPELINES
 export type RenderPipelines = {
-    shaderModule: GPUShaderModule;
-    render: GPURenderPipeline;
+    densityShaderModule: GPUShaderModule;
+    toneMapShaderModule: GPUShaderModule;
+    density: GPURenderPipeline;
+    toneMap: GPURenderPipeline;
 };
 
 export function createRenderPipelines(device: GPUDevice, canvasFormat: GPUTextureFormat): RenderPipelines {
-    const shaderModule = device.createShaderModule({
-        code: renderShaderCode,
+    const densityShaderModule = device.createShaderModule({
+        code: densityShaderCode,
+    });
+    const toneMapShaderModule = device.createShaderModule({
+        code: toneMapShaderCode,
     });
 
-    const renderPipeline = device.createRenderPipeline({
+    const densityPipeline = device.createRenderPipeline({
         layout: "auto",
         vertex: {
-            module: shaderModule,
+            module: densityShaderModule,
             entryPoint: "vertex_main",
         },
         fragment: {
-            module: shaderModule,
+            module: densityShaderModule,
             entryPoint: "fragment_main",
             targets: [{ 
-            format: canvasFormat,
-            blend: {
-                color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
-                alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add", },
-            },
-            writeMask: GPUColorWrite.ALL,
+                format: "r16float",
+                writeMask: GPUColorWrite.ALL,
+            }],
+        },
+        primitive: {
+            topology: "triangle-list",
+        },
+    });
+
+    const toneMapPipeline = device.createRenderPipeline({
+        layout: "auto",
+        vertex: {
+            module: toneMapShaderModule,
+            entryPoint: "vertex_main",
+        },
+        fragment: {
+            module: toneMapShaderModule,
+            entryPoint: "fragment_main",
+            targets: [{ 
+                format: canvasFormat,
+                blend: {
+                    color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+                    alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add", },
+                },
+                writeMask: GPUColorWrite.ALL,
             }],
         },
         primitive: {
@@ -124,7 +149,9 @@ export function createRenderPipelines(device: GPUDevice, canvasFormat: GPUTextur
     });
 
     return {
-        shaderModule,
-        render: renderPipeline,
+        densityShaderModule: densityShaderModule,
+        toneMapShaderModule: toneMapShaderModule,
+        density: densityPipeline,
+        toneMap: toneMapPipeline,
     };
 }

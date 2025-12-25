@@ -32,36 +32,37 @@ export class Renderer implements GPUCommandSource {
 
     public getCommands(): GPUCommandBuffer {
         const commandEncoder = this.device.createCommandEncoder();
-        const textureView = this.context.getCurrentTexture().createView();
+        const canvasTextureView = this.context.getCurrentTexture().createView();
 
         // first pass: fill density texture
-        // const densityPass = commandEncoder.beginRenderPass({
-        //     colorAttachments: [
-        //     {
-        //         view: this.buffers.densityTex.createView(),
-        //         clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        //         loadOp: "clear",
-        //         storeOp: "store",
-        //     },
-        //     ],
-        // })
-        // set pipelines etc
+        const densityPass = commandEncoder.beginRenderPass({
+            colorAttachments: [{
+                view: this.buffers.densityTextureView,
+                clearValue: { r: 0, g: 0, b: 0, a: 0 },
+                loadOp: "clear",
+                storeOp: "store",
+            }],
+        });
+        densityPass.setPipeline(this.pipelines.density);
+        densityPass.setBindGroup(0, this.bindGroups.density);
+        densityPass.draw() // what should the arguments be?
+        densityPass.end();
 
 
         // second pass: render to screen from density texture
         const renderPass = commandEncoder.beginRenderPass({
             colorAttachments: [
             {
-                view: textureView,
+                view: canvasTextureView,
                 clearValue: { r: 0, g: 0, b: 0, a: 1 },
                 loadOp: "clear",
                 storeOp: "store",
             },
             ],
         });
-        renderPass.setPipeline(this.pipelines.render);
-        renderPass.setBindGroup(0, this.bindGroups.render);
-        renderPass.draw(6, this.sim.getNumBodies(), 0, 0);
+        renderPass.setPipeline(this.pipelines.toneMap);
+        renderPass.setBindGroup(0, this.bindGroups.toneMap);
+        renderPass.draw(); // what should the arguments be?
         renderPass.end();
 
         return commandEncoder.finish();

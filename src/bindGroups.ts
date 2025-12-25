@@ -80,20 +80,34 @@ export function createSimBindGroups(device: GPUDevice, buffers: SimBuffers, pipe
 
 // RENDERING BIND GROUPS
 export type RenderBindGroups = Readonly<{
-    render: GPUBindGroup;
+    density: GPUBindGroup;
+    toneMap: GPUBindGroup;
 }>;
 
 export function createRenderBindGroups(device: GPUDevice, buffers: RenderBuffers, pipelines: RenderPipelines): RenderBindGroups {
-    const renderBindGroup = device.createBindGroup({
-        layout: pipelines.render.getBindGroupLayout(0),
+    // adjust bindings as needed
+    const densityBindGroup = device.createBindGroup({
+        layout: pipelines.density.getBindGroupLayout(0),
         entries: [
-            { binding: 0, resource: { buffer: buffers.floatMetadata } },
-            { binding: 1, resource: { buffer: buffers.uintMetadata } },
-            { binding: 2, resource: { buffer: buffers.pos } },
-        ]
+            { binding: 0, resource: buffers.floatMetadata },
+            { binding: 1, resource: buffers.uintMetadata },
+            { binding: 2, resource: buffers.pos },
+            { binding: 3, resource: buffers.densityTextureView },
+        ],
+    });
+
+    // adjust these as needed too
+    const toneMapBindGroup = device.createBindGroup({
+        layout: pipelines.toneMap.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: buffers.floatMetadata },
+            { binding: 1, resource: buffers.uintMetadata },
+            { binding: 3, resource: buffers.densityTextureView },
+        ],
     });
 
     return {
-        render: renderBindGroup,
+        density: densityBindGroup,
+        toneMap: toneMapBindGroup,
     };
 }
