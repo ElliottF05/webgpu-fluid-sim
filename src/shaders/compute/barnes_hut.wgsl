@@ -1,17 +1,12 @@
 // STRUCTS
 
-struct FloatMetadata {
+struct Metadata {
+    num_bodies: u32,
     grav_constant: f32,
     delta_time: f32,
     epsilon_multiplier: f32,
     bh_theta: f32,
-    cam_center: vec2<f32>,
-    cam_half_size: vec2<f32>,
-    viewport: vec2<f32>,
-}
-
-struct UintMetadata {
-    num_bodies: u32,
+    _pad0: u32,
 }
 
 struct NodeData {
@@ -23,23 +18,25 @@ struct NodeData {
     left_child: u32,
     right_child: u32,
     parent: u32,
-    _pad: u32,
+    _pad0: u32,
 }
 
 
 // BINDINGS AND BUFFERS
 
 // metadata buffers
-@group(0) @binding(0) var<uniform> float_metadata: FloatMetadata;
-@group(0) @binding(1) var<uniform> uint_metadata: UintMetadata;
+@group(0) @binding(0) var<uniform> metadata: Metadata;
 
 // data buffers
+@group(0) @binding(1) var<storage, read_write> mass_buf: array<f32>;
 @group(0) @binding(2) var<storage, read_write> pos_buf: array<vec2<f32>>;
 @group(0) @binding(3) var<storage, read_write> vel_buf: array<vec2<f32>>;
-@group(0) @binding(4) var<storage, read_write> mass_buf: array<f32>;
 
-@group(0) @binding(5) var<storage, read> body_indices: array<u32>;
+// @group(0) @binding(4) var<storage, read_write> morton_codes: array<u32>; not needed here
+@group(0) @binding(5) var<storage, read_write> body_indices: array<u32>;
+
 @group(0) @binding(6) var<storage, read_write> node_data: array<NodeData>;
+// @group(0) @binding(7) var<storage, read_write> node_status: array<atomic<u32>>; not needed here
 
 
 // HELPER FUNCTIONS
@@ -51,16 +48,16 @@ fn is_leaf(node_index: u32, n: u32) -> bool {
 @compute @workgroup_size(64)
 fn bh_vel_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let thread_idx = global_id.x;
-    let n = uint_metadata.num_bodies;
+    let n = metadata.num_bodies;
     if thread_idx >= n {
         return;
     }
 
     let body_idx = body_indices[thread_idx];
 
-    let g = float_metadata.grav_constant;
-    let dt = float_metadata.delta_time;
-    let theta = float_metadata.bh_theta;
+    let g = metadata.grav_constant;
+    let dt = metadata.delta_time;
+    let theta = metadata.bh_theta;
 
     let pos1 = pos_buf[body_idx];
     let m1 = mass_buf[body_idx];
@@ -91,7 +88,7 @@ fn bh_vel_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
 
         let m_eff = max(m1, m2);
-        let eps = float_metadata.epsilon_multiplier * sqrt(g * m_eff * dt);
+        let eps = metadata.epsilon_multiplier * sqrt(g * m_eff * dt);
         let inv_denom = inverseSqrt(dist_squared + eps * eps);
 
         if is_leaf(node_idx, n) || node.length * inv_denom < theta {
@@ -108,7 +105,7 @@ fn bh_vel_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
     }
-
+    
     // update velocity
     vel_buf[body_idx] = vel_buf[body_idx] + accel * dt;
 }
@@ -116,9 +113,9 @@ fn bh_vel_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 @compute @workgroup_size(64)
 fn bh_pos_step_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let thread_idx = global_id.x;
-    if thread_idx >= uint_metadata.num_bodies {
+    if thread_idx >= metadata.num_bodies {
         return;
     }
     let body_idx = body_indices[thread_idx];
-    pos_buf[body_idx] = pos_buf[body_idx] + vel_buf[body_idx] * float_metadata.delta_time;
+    pos_buf[body_idx] = pos_buf[body_idx] + vel_buf[body_idx] * metadata.delta_time;
 }

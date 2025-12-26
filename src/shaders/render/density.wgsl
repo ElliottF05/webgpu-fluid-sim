@@ -1,17 +1,11 @@
 // STRUCTS
 
-struct FloatMetadata {
-    grav_constant: f32,
-    delta_time: f32,
-    epsilon_multiplier: f32,
-    bh_theta: f32,
+struct Metadata {
     cam_center: vec2<f32>,
     cam_half_size: vec2<f32>,
     viewport: vec2<f32>,
-}
-
-struct UintMetadata {
     num_bodies: u32,
+    _pad0: u32,
 }
 
 struct VSOut {
@@ -24,18 +18,17 @@ struct VSOut {
 // BINDINGS AND BUFFERS
 
 // metadata buffers
-@group(0) @binding(0) var<uniform> float_metadata: FloatMetadata;
-@group(0) @binding(1) var<uniform> uint_metadata: UintMetadata;
+@group(0) @binding(0) var<uniform> metadata: Metadata;
 
 // data buffers
-@group(0) @binding(2) var<storage, read> pos: array<vec2<f32>>;
+@group(0) @binding(1) var<storage, read> pos: array<vec2<f32>>;
 
 
 // HELPER FUNCTIONS
 
 fn world_to_ndc(p: vec2<f32>) -> vec2<f32> {
     // maps to [-1,1]
-    return (p - float_metadata.cam_center) / float_metadata.cam_half_size;
+    return (p - metadata.cam_center) / metadata.cam_half_size;
 }
 
 
@@ -54,7 +47,7 @@ fn vertex_main(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u3
 
     var out: VSOut;
 
-    if iid >= uint_metadata.num_bodies {
+    if iid >= metadata.num_bodies {
         out.pos = vec4<f32>(2.0, 2.0, 0.0, 1.0); // offscreen
         out.uv = vec2<f32>(0.0);
         out.radius_px = 0.0;
@@ -65,11 +58,7 @@ fn vertex_main(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u3
     let center_ndc = world_to_ndc(world_pos);
 
     var radius_px = 2.0;
-    if iid == 0u {
-        radius_px = 5.0; // make user-controlled body larger
-    }
-
-    let px_to_ndc = 2.0 / float_metadata.viewport;
+    let px_to_ndc = 2.0 / metadata.viewport;
     let radius_ndc = radius_px * px_to_ndc;
 
     let uv = quad[vid];
@@ -93,7 +82,7 @@ fn fragment_main(in: VSOut) -> @location(0) vec4<f32> {
     let w = exp(-k * r * r);
 
     // compensate for zoom by reducing per-pixel contribution when zoomed out
-    let zoom = max(float_metadata.cam_half_size.x, float_metadata.cam_half_size.y);
+    let zoom = max(metadata.cam_half_size.x, metadata.cam_half_size.y);
     let zoom_scale = 1.0 / (1.0 + 0.05 * zoom); // tweak 0.05 to adjust falloff speed
 
     let base = 0.02; // change this to adjust overall brightness

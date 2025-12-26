@@ -39,27 +39,10 @@ canvas {
   z-index: 10;
 }
 
-.panel .slider-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 180px;
-}
-
-.panel .select-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .panel select {
   background: #111;
   color: #eee;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 4px;
   padding: 4px 6px;
-}
-
-.panel input[type="range"] {
-  width: 140px;
 }
