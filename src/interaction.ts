@@ -1,5 +1,5 @@
 import type { Renderer } from "./renderer";
-import type { Simulation } from "./simulation";
+import type { SimScenario, Simulation } from "./simulation";
 
 
 export class InteractionController {
@@ -20,6 +20,16 @@ export class InteractionController {
         this.addDragListener();
         this.addResizeListener();
         this.addNumBodiesListeners();
+    }
+
+    private updateNumBodies(numBodies: number) {
+        this.sim.setNumBodies(numBodies);
+        this.renderer.setNumBodies(this.sim.getNumBodies());
+        this.renderer.rebindPosBuffer(this.sim.getBuffers().pos);
+    }
+
+    private updateScenario(scenario: SimScenario) {
+        // this.sim.setScenario(scenario);
     }
 
     private clientToCanvasCoords(clientX: number, clientY: number): [number, number] {
@@ -88,8 +98,7 @@ export class InteractionController {
             if (Number.isNaN(numBodies) || numBodies <= 0) {
                 return;
             }
-            this.sim.setNumBodies(numBodies);
-            this.renderer.updateMetadataBuffer();
+            this.updateNumBodies(numBodies);
         });
     }
 

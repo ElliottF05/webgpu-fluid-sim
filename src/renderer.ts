@@ -1,5 +1,3 @@
-import type { GPUCommandSource } from "./main";
-import type { Simulation } from "./simulation";
 import densityShaderCode from "./shaders/render/density.wgsl?raw";
 import toneMapShaderCode from "./shaders/render/tone_map.wgsl?raw";
 
@@ -21,20 +19,18 @@ type RenderBindGroups = {
     toneMap: GPUBindGroup;
 };
 
-export class Renderer implements GPUCommandSource {
+export class Renderer {
     // gpu device and canvas context
     private readonly device: GPUDevice;
     private readonly canvas: HTMLCanvasElement;
     private readonly context: GPUCanvasContext;
     private readonly canvasFormat: GPUTextureFormat;
 
-    // sim instance
-    private readonly sim: Simulation;
-
     // local state
     private viewPort: [number, number];
     private camCenter: [number, number];
     private camHalfSize: [number, number];
+    private numBodies: number;
 
     // GPU buffers, pipelines, and bind groups
     private buffers: RenderBuffers;
@@ -44,27 +40,24 @@ export class Renderer implements GPUCommandSource {
 
     // INITIALIZATION
 
-    public constructor(device: GPUDevice, canvas: HTMLCanvasElement, context: GPUCanvasContext, canvasFormat: GPUTextureFormat, sim: Simulation) {
+    public constructor(device: GPUDevice, canvas: HTMLCanvasElement, context: GPUCanvasContext, canvasFormat: GPUTextureFormat, initialPosBuffer: GPUBuffer) {
         this.device = device;
         this.canvas = canvas;
         this.context = context;
         this.canvasFormat = canvasFormat;
-        this.sim = sim;
 
         this.viewPort = [context.canvas.width, context.canvas.height];
         this.camCenter = [0.0, 0.0];
         this.camHalfSize = [10.0, 10.0];
+        this.numBodies = 0;
 
         // GPU buffers, pipelines, and bind groups
         this.buffers = this.createRenderBuffers();
         this.pipelines = this.createRenderPipelines();
-        this.bindGroups = this.createRenderBindGroups();
+        this.bindGroups = this.createRenderBindGroups(initialPosBuffer);
 
         // initial resize
         this.resizeCanvasToDisplaySize();
-
-        // fill buffers with initial data
-        this.updateMetadataBuffer();
     }
 
     private createRenderBuffers(): RenderBuffers {
@@ -151,12 +144,12 @@ export class Renderer implements GPUCommandSource {
         };
     }
 
-    private createRenderBindGroups(): RenderBindGroups {
+    private createRenderBindGroups(posBuffer: GPUBuffer): RenderBindGroups {
         const density = this.device.createBindGroup({
             layout: this.pipelines.density.getBindGroupLayout(0),
             entries: [
                 { binding: 0, resource: { buffer: this.buffers.metadataBuffer } },
-                { binding: 1, resource: { buffer: this.sim.getBuffers().pos } },
+                { binding: 1, resource: { buffer: posBuffer } },
             ],
         });
 
@@ -174,7 +167,7 @@ export class Renderer implements GPUCommandSource {
         };
     }
 
-    public updateMetadataBuffer() {
+    private updateMetadataBuffer() {
         const metadataArray = new ArrayBuffer(8 * 4);
         const floatView = new Float32Array(metadataArray);
         const uintView = new Uint32Array(metadataArray);
@@ -185,7 +178,7 @@ export class Renderer implements GPUCommandSource {
         floatView[3] = this.camHalfSize[1];
         floatView[4] = this.viewPort[0];
         floatView[5] = this.viewPort[1];
-        uintView[6] = this.sim.getNumBodies();
+        uintView[6] = this.numBodies;
 
         this.device.queue.writeBuffer(this.buffers.metadataBuffer, 0, metadataArray);
     }
@@ -210,15 +203,20 @@ export class Renderer implements GPUCommandSource {
         });
     }
 
-    public rebindPosBuffer() {
+    public rebindPosBuffer(posBuffer: GPUBuffer) {
         // recreate density bind group with new position buffer
         this.bindGroups.density = this.device.createBindGroup({
             layout: this.pipelines.density.getBindGroupLayout(0),
             entries: [
                 { binding: 0, resource: { buffer: this.buffers.metadataBuffer } },
-                { binding: 1, resource: { buffer: this.sim.getBuffers().pos } },
+                { binding: 1, resource: { buffer: posBuffer } },
             ],
         });
+    }
+
+    public setNumBodies(numBodies: number) {
+        this.numBodies = numBodies;
+        this.updateMetadataBuffer();
     }
 
     public resizeCanvasToDisplaySize() {
@@ -289,7 +287,8 @@ export class Renderer implements GPUCommandSource {
         this.updateMetadataBuffer();
     }
 
-    public getCommands(): GPUCommandBuffer {
+
+    public getCommands(numBodies: number): GPUCommandBuffer {
         const commandEncoder = this.device.createCommandEncoder();
         const canvasTextureView = this.context.getCurrentTexture().createView();
 
@@ -304,7 +303,7 @@ export class Renderer implements GPUCommandSource {
         });
         densityPass.setPipeline(this.pipelines.density);
         densityPass.setBindGroup(0, this.bindGroups.density);
-        densityPass.draw(6, this.sim.getNumBodies(), 0, 0);
+        densityPass.draw(6, numBodies, 0, 0);
         densityPass.end();
 
 

@@ -1,11 +1,8 @@
-import type { GPUCommandSource } from "./main";
 import { type Config } from "./config";
 import lbvhShaderCode from "./shaders/compute/lbvh.wgsl?raw";
 import barnesHutShaderCode from "./shaders/compute/barnes_hut.wgsl?raw";
-
 // @ts-ignore
 import { RadixSortKernel } from "webgpu-radix-sort";
-import type { Renderer } from "./renderer";
 
 
 type SimBuffers = {
@@ -36,17 +33,14 @@ type SimBindGroups = {
     barnesHutPosStep: GPUBindGroup;
 };
 
-type SimScenario = "default" | "others";
+export type SimScenario = "default" | "others";
 
-export class Simulation implements GPUCommandSource {
+export class Simulation {
     // immutable config
     private readonly config: Config;
 
     // gpu device
     private readonly device: GPUDevice;
-
-    // renderer instance
-    private renderer?: Renderer;
 
     // current scenario
     private currentScenario: SimScenario;
@@ -75,13 +69,10 @@ export class Simulation implements GPUCommandSource {
         this.buffers = this.createSimBuffers();
         this.pipelines = this.createSimPipelines();
         this.bindGroups = this.createSimBindGroups();
-
-        // fill buffers with initial data
-        this.updateMetadataBuffer();
-        this.setScenario(this.currentScenario);
     }
 
     private createSimBuffers(): SimBuffers {
+        console.log(`Creating simulation buffers for ${this.numBodies} bodies.`);
         const metadata = this.device.createBuffer({
             size: 8 * 4,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -118,6 +109,7 @@ export class Simulation implements GPUCommandSource {
     }
 
     private createSimPipelines(): SimPipelines {
+        console.log(`Creating simulation pipelines for ${this.numBodies} bodies.`);
         const lbvhShaderModule = this.device.createShaderModule({
             code: lbvhShaderCode,
         });
@@ -164,6 +156,7 @@ export class Simulation implements GPUCommandSource {
     }
 
     private createSimBindGroups(): SimBindGroups {
+        console.log(`Creating simulation bind groups for ${this.numBodies} bodies.`);
         const computeMorton = this.device.createBindGroup({
             layout: this.pipelines.computeMorton.getBindGroupLayout(0),
             entries: [
@@ -223,10 +216,6 @@ export class Simulation implements GPUCommandSource {
         };
     }
 
-    public setRenderer(renderer: Renderer) {
-        this.renderer = renderer;
-    }
-
     public updateMetadataBuffer() {
         const metadataArray = new ArrayBuffer(8 * 4);
         const metadataFloatView = new Float32Array(metadataArray);
@@ -245,13 +234,6 @@ export class Simulation implements GPUCommandSource {
         this.numBodies = numBodies;
         this.updateMetadataBuffer();
         this.setScenario(this.currentScenario);
-    }
-
-    public setNumBodiesAndScenario(numBodies: number, scenario: SimScenario) {
-        this.numBodies = numBodies;
-        this.updateMetadataBuffer();
-        this.setScenario(scenario);
-        this.currentScenario = scenario;
     }
 
     public setScenario(scenario: SimScenario) {
@@ -294,7 +276,6 @@ export class Simulation implements GPUCommandSource {
 
         this.updateMetadataBuffer();
         this.updatePhysicsBuffers(massData, posData, velData);
-        this.renderer?.rebindPosBuffer();
     }
 
     private updatePhysicsBuffers(massData: Float32Array, posData: Float32Array, velData: Float32Array) {
