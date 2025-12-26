@@ -14,7 +14,7 @@ async function main() {
 
     const sim = new Simulation(config, device);
     const renderer = new Renderer(device, canvas, context, canvasFormat, sim.getBuffers().pos);
-    // @ts-ignore
+    // @ts-ignore 
     const interaction = new InteractionController(canvas, sim, renderer);
 
     // initial setup
