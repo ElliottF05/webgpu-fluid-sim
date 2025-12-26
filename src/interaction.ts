@@ -20,6 +20,7 @@ export class InteractionController {
         this.addDragListener();
         this.addResizeListener();
         this.addNumBodiesListeners();
+        this.addScenarioListener();
     }
 
     private updateNumBodies(numBodies: number) {
@@ -29,7 +30,8 @@ export class InteractionController {
     }
 
     private updateScenario(scenario: SimScenario) {
-        // this.sim.setScenario(scenario);
+        this.sim.setScenario(scenario);
+        this.renderer.rebindPosBuffer(this.sim.getBuffers().pos);
     }
 
     private clientToCanvasCoords(clientX: number, clientY: number): [number, number] {
@@ -105,6 +107,14 @@ export class InteractionController {
     private addResizeListener() {
         window.addEventListener("resize", () => {
             this.renderer.resizeCanvasToDisplaySize();
+        });
+    }
+
+    private addScenarioListener() {
+        const scenarioSelect = document.getElementById("scenarioSelect") as HTMLSelectElement;
+        scenarioSelect.addEventListener("change", () => {
+            const scenario = scenarioSelect.value as SimScenario;
+            this.updateScenario(scenario);
         });
     }
 }
