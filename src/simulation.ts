@@ -54,10 +54,6 @@ export class Simulation implements GPUCommandSource {
     // num bodies
     private numBodies: number;
 
-    // user body parameters
-    private userBodyPos: [number, number];
-    private userBodyMass: number;
-
     // GPU buffers, pipelines, and bind groups
     private buffers: SimBuffers;
     private pipelines: SimPipelines;
@@ -74,10 +70,6 @@ export class Simulation implements GPUCommandSource {
 
         // set up num bodies
         this.numBodies = 50000;
-
-        // set up user body params
-        this.userBodyPos = [0.0, 0.0];
-        this.userBodyMass = 0.0;
 
         // set up GPU buffers, pipelines, and bind groups
         this.buffers = this.createSimBuffers();
@@ -357,20 +349,5 @@ export class Simulation implements GPUCommandSource {
     }
     public getNumBodies(): number {
         return this.numBodies;
-    }
-    public getUserBodyPos(): [number, number] {
-        return this.userBodyPos;
-    }
-    public setUserBodyPos(worldX: number, worldY: number) {
-        this.userBodyPos = [worldX, worldY];
-        this.updateMetadataBuffer();
-        this.renderer?.updateMetadataBuffer();
-    }
-    public getUserBodyMass(): number {
-        return this.userBodyMass;
-    }
-    public setUserBodyMass(mass: number) {
-        this.userBodyMass = mass;
-        this.updateMetadataBuffer();
     }
 }
