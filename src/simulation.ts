@@ -33,7 +33,7 @@ type SimBindGroups = {
     barnesHutPosStep: GPUBindGroup;
 };
 
-export type SimScenario = "default" | "others";
+export type SimScenario = "default" | "two-galaxies";
 
 export class Simulation {
     // immutable config
@@ -268,6 +268,48 @@ export class Simulation {
                 velData[i * 2 + 0] = vx;
                 velData[i * 2 + 1] = vy;
             }
+        } else if (scenario === "two-galaxies") {
+            // two orbiting galaxies
+            const galaxyOffset = 15.0;
+            const radius = 3.0;
+            const speedFactor = 0.12;
+            for (let i = 0; i < this.numBodies; i++) {
+                // mass
+                massData[i] = 1.0;
+
+                // position
+                const angle = Math.random() * 2.0 * Math.PI;
+                const r = radius * Math.sqrt(Math.random());
+                const xBase = r * Math.cos(angle);
+                const yBase = r * Math.sin(angle);
+
+                let x: number, y: number;
+                if (i < this.numBodies / 2) {
+                    x = xBase - galaxyOffset;
+                    y = yBase;
+                } else {
+                    x = xBase + galaxyOffset;
+                    y = yBase;
+                }
+                posData[i * 2 + 0] = x;
+                posData[i * 2 + 1] = y;
+
+                // velocity (circular orbit around galaxy center)
+                const dist = Math.sqrt(xBase * xBase + yBase * yBase);
+                const speed = speedFactor * Math.sqrt(this.config.gravConstant * (this.numBodies / 2) / dist);
+                let vx: number, vy: number;
+                if (i < this.numBodies / 2) {
+                    vx = -speed * (yBase / dist);
+                    vy = speed * (xBase / dist);
+                } else {
+                    vx = speed * (yBase / dist);
+                    vy = -speed * (xBase / dist);
+                }
+                velData[i * 2 + 0] = vx;
+                velData[i * 2 + 1] = vy;
+            }
+        } else {
+            throw new Error(`Unknown scenario: ${scenario}`);
         }
 
         this.buffers = this.createSimBuffers();
