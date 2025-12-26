@@ -44,9 +44,9 @@ export class Renderer implements GPUCommandSource {
 
     // INITIALIZATION
 
-    public constructor(device: GPUDevice, context: GPUCanvasContext, canvasFormat: GPUTextureFormat, sim: Simulation) {
+    public constructor(device: GPUDevice, canvas: HTMLCanvasElement, context: GPUCanvasContext, canvasFormat: GPUTextureFormat, sim: Simulation) {
         this.device = device;
-        this.canvas = context.canvas as HTMLCanvasElement;
+        this.canvas = canvas;
         this.context = context;
         this.canvasFormat = canvasFormat;
         this.sim = sim;
@@ -61,11 +61,14 @@ export class Renderer implements GPUCommandSource {
         this.buffers = this.createRenderBuffers();
         this.pipelines = this.createRenderPipelines();
         this.bindGroups = this.createRenderBindGroups();
+
+        // fill buffers with initial data
+        this.updateMetadataBuffer();
     }
 
     private createRenderBuffers(): RenderBuffers {
         const metadataBuffer = this.device.createBuffer({
-            size: 4 * 4,
+            size: 8 * 4,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
         const densityTexture = this.device.createTexture({
@@ -151,8 +154,8 @@ export class Renderer implements GPUCommandSource {
         const density = this.device.createBindGroup({
             layout: this.pipelines.density.getBindGroupLayout(0),
             entries: [
-                { binding: 0, resource: this.buffers.metadataBuffer },
-                { binding: 1, resource: this.sim.getBuffers().pos },
+                { binding: 0, resource: { buffer: this.buffers.metadataBuffer } },
+                { binding: 1, resource: { buffer: this.sim.getBuffers().pos } },
             ],
         });
 
@@ -160,9 +163,8 @@ export class Renderer implements GPUCommandSource {
         const toneMap = this.device.createBindGroup({
             layout: this.pipelines.toneMap.getBindGroupLayout(0),
             entries: [
-                // { binding: 0, resource: this.buffers.metadataBuffer }, not needed for now
-                { binding: 1, resource: this.buffers.densityTextureView },
-                { binding: 2, resource: this.buffers.densityTextureSampler },
+                { binding: 0, resource: this.buffers.densityTextureView },
+                { binding: 1, resource: this.buffers.densityTextureSampler },
             ],
         });
 
@@ -170,6 +172,22 @@ export class Renderer implements GPUCommandSource {
             density,
             toneMap,
         };
+    }
+
+    private updateMetadataBuffer() {
+        const metadataArray = new ArrayBuffer(8 * 4);
+        const floatView = new Float32Array(metadataArray);
+        const uintView = new Uint32Array(metadataArray);
+        
+        floatView[0] = this.camCenter[0];
+        floatView[1] = this.camCenter[1];
+        floatView[2] = this.camHalfSize[0];
+        floatView[3] = this.camHalfSize[1];
+        floatView[4] = this.viewPort[0];
+        floatView[5] = this.viewPort[1];
+        uintView[6] = this.sim.getNumBodies();
+
+        this.device.queue.writeBuffer(this.buffers.metadataBuffer, 0, metadataArray);
     }
 
     private resizeCanvasToDisplaySize() {

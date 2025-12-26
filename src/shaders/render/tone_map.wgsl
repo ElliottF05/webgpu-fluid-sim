@@ -1,19 +1,5 @@
 // STRUCTS
 
-struct FloatMetadata {
-    grav_constant: f32,
-    delta_time: f32,
-    epsilon_multiplier: f32,
-    bh_theta: f32,
-    cam_center: vec2<f32>,
-    cam_half_size: vec2<f32>,
-    viewport: vec2<f32>,
-}
-
-struct UintMetadata {
-    num_bodies: u32,
-}
-
 struct VSOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -22,16 +8,11 @@ struct VSOut {
 
 // BINDINGS AND BUFFERS
 
-// metadata buffers
-@group(0) @binding(0) var<uniform> float_metadata: FloatMetadata;
-@group(0) @binding(1) var<uniform> uint_metadata: UintMetadata;
-
-
 // data buffers
-@group(0) @binding(2) var density_tex: texture_2d<f32>;
+@group(0) @binding(0) var density_tex: texture_2d<f32>;
 
 // sampler
-@group(0) @binding(3) var density_sampler: sampler;
+@group(0) @binding(1) var density_sampler: sampler;
 
 
 // HELPER FUNCTIONS

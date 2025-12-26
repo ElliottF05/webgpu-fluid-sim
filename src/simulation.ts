@@ -1,6 +1,5 @@
 import type { GPUCommandSource } from "./main";
 import { type Config } from "./config";
-import type { Renderer } from "./renderer";
 import lbvhShaderCode from "./shaders/compute/lbvh.wgsl?raw";
 import barnesHutShaderCode from "./shaders/compute/barnes_hut.wgsl?raw";
 
@@ -36,6 +35,8 @@ type SimBindGroups = {
     barnesHutPosStep: GPUBindGroup;
 };
 
+type SimScenario = "default" | "others";
+
 export class Simulation implements GPUCommandSource {
     // immutable config
     private readonly config: Config;
@@ -43,8 +44,8 @@ export class Simulation implements GPUCommandSource {
     // gpu device
     private readonly device: GPUDevice;
 
-    // renderer instance
-    private renderer?: Renderer;
+    // current scenario
+    private currentScenario: SimScenario;
 
     // num bodies
     private numBodies: number;
@@ -61,6 +62,8 @@ export class Simulation implements GPUCommandSource {
         this.config = config;
         this.device = device;
 
+        this.currentScenario = "default";
+
         // set up num bodies
         this.numBodies = 50000;
 
@@ -68,11 +71,15 @@ export class Simulation implements GPUCommandSource {
         this.buffers = this.createSimBuffers();
         this.pipelines = this.createSimPipelines();
         this.bindGroups = this.createSimBindGroups();
+
+        // fill buffers with initial data
+        this.updateMetadataBuffer();
+        this.setScenario(this.currentScenario);
     }
 
     private createSimBuffers(): SimBuffers {
         const metadata = this.device.createBuffer({
-            size: 6 * 4,
+            size: 8 * 4,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
 
@@ -157,49 +164,49 @@ export class Simulation implements GPUCommandSource {
             layout: this.pipelines.computeMorton.getBindGroupLayout(0),
             entries: [
                 { binding: 0, resource: { buffer: this.buffers.metadata } },
-                { binding: 1, resource: { buffer: this.buffers.pos } },
-                { binding: 2, resource: { buffer: this.buffers.mortonCodes } },
-                { binding: 3, resource: { buffer: this.buffers.bodyIndices } },
+                { binding: 2, resource: { buffer: this.buffers.pos } },
+                { binding: 4, resource: { buffer: this.buffers.mortonCodes } },
+                { binding: 5, resource: { buffer: this.buffers.bodyIndices } },
             ]
         });
         const buildLBVH = this.device.createBindGroup({
             layout: this.pipelines.buildLBVH.getBindGroupLayout(0),
             entries: [
                 { binding: 0, resource: { buffer: this.buffers.metadata } },
-                { binding: 1, resource: { buffer: this.buffers.mortonCodes } },
-                { binding: 2, resource: { buffer: this.buffers.nodeData } },
-                { binding: 3, resource: { buffer: this.buffers.nodeStatus } },
+                { binding: 4, resource: { buffer: this.buffers.mortonCodes } },
+                { binding: 6, resource: { buffer: this.buffers.nodeData } },
+                { binding: 7, resource: { buffer: this.buffers.nodeStatus } },
             ]
         });
         const fillLBVH = this.device.createBindGroup({
             layout: this.pipelines.fillLBVH.getBindGroupLayout(0),
             entries: [
                 { binding: 0, resource: { buffer: this.buffers.metadata } },
-                { binding: 1, resource: { buffer: this.buffers.pos } },
-                { binding: 2, resource: { buffer: this.buffers.mass } },
-                { binding: 3, resource: { buffer: this.buffers.bodyIndices } },
-                { binding: 4, resource: { buffer: this.buffers.nodeData } },
-                { binding: 5, resource: { buffer: this.buffers.nodeStatus } },
+                { binding: 1, resource: { buffer: this.buffers.mass } },
+                { binding: 2, resource: { buffer: this.buffers.pos } },
+                { binding: 5, resource: { buffer: this.buffers.bodyIndices } },
+                { binding: 6, resource: { buffer: this.buffers.nodeData } },
+                { binding: 7, resource: { buffer: this.buffers.nodeStatus } },
             ]
         });
         const barnesHutVelStep = this.device.createBindGroup({
             layout: this.pipelines.barnesHutVelStep.getBindGroupLayout(0),
             entries: [
                 { binding: 0, resource: { buffer: this.buffers.metadata } },
-                { binding: 1, resource: { buffer: this.buffers.pos } },
-                { binding: 2, resource: { buffer: this.buffers.vel } },
-                { binding: 3, resource: { buffer: this.buffers.mass } },
-                { binding: 4, resource: { buffer: this.buffers.bodyIndices } },
-                { binding: 5, resource: { buffer: this.buffers.nodeData } },
+                { binding: 1, resource: { buffer: this.buffers.mass } },
+                { binding: 2, resource: { buffer: this.buffers.pos } },
+                { binding: 3, resource: { buffer: this.buffers.vel } },
+                { binding: 5, resource: { buffer: this.buffers.bodyIndices } },
+                { binding: 6, resource: { buffer: this.buffers.nodeData } },
             ]
         });
         const barnesHutPosStep = this.device.createBindGroup({
             layout: this.pipelines.barnesHutPosStep.getBindGroupLayout(0),
             entries: [
                 { binding: 0, resource: { buffer: this.buffers.metadata } },
-                { binding: 1, resource: { buffer: this.buffers.pos } },
-                { binding: 2, resource: { buffer: this.buffers.vel } },
-                { binding: 3, resource: { buffer: this.buffers.bodyIndices } },
+                { binding: 2, resource: { buffer: this.buffers.pos } },
+                { binding: 3, resource: { buffer: this.buffers.vel } },
+                { binding: 5, resource: { buffer: this.buffers.bodyIndices } },
             ]
         });
 
@@ -212,8 +219,59 @@ export class Simulation implements GPUCommandSource {
         };
     }
 
-    public setRenderer(renderer: Renderer): void {
-        this.renderer = renderer;
+    public updateMetadataBuffer() {
+        const metadataArray = new ArrayBuffer(8 * 4);
+        const metadataFloatView = new Float32Array(metadataArray);
+        const metadataUintView = new Uint32Array(metadataArray);
+
+        metadataUintView[0] = this.numBodies;
+        metadataFloatView[1] = this.config.gravConstant;
+        metadataFloatView[2] = this.config.deltaTime;
+        metadataFloatView[3] = this.config.epsilonMultiplier;
+        metadataFloatView[4] = this.config.bhTheta;
+
+        this.device.queue.writeBuffer(this.buffers.metadata, 0, metadataArray);
+    }
+
+    public setNumBodies(numBodies: number) {
+        this.numBodies = numBodies;
+        this.updateMetadataBuffer();
+        this.setScenario(this.currentScenario);
+    }
+
+    public setNumBodiesAndScenario(numBodies: number, scenario: SimScenario) {
+        this.numBodies = numBodies;
+        this.updateMetadataBuffer();
+        this.setScenario(scenario);
+        this.currentScenario = scenario;
+    }
+
+    public setScenario(scenario: SimScenario) {
+        // for now, only default scenario
+        this.currentScenario = scenario;
+        if (scenario === "default") {
+            const massData = new Float32Array(this.numBodies);
+            const posData = new Float32Array(this.numBodies * 2);
+            const velData = new Float32Array(this.numBodies * 2);
+
+            // simple random distribution
+            for (let i = 0; i < this.numBodies; i++) {
+                massData[i] = Math.random() * 5.0 + 1.0; // mass between 1 and 6
+
+                posData[2 * i] = (Math.random() - 0.5) * 20.0; // x position
+                posData[2 * i + 1] = (Math.random() - 0.5) * 20.0; // y position
+
+                velData[2 * i] = (Math.random() - 0.5) * 1.0; // x velocity
+                velData[2 * i + 1] = (Math.random() - 0.5) * 1.0; // y velocity
+            }
+            this.updatePhysicsBuffers(massData, posData, velData);
+        }
+    }
+
+    private updatePhysicsBuffers(massData: Float32Array, posData: Float32Array, velData: Float32Array) {
+        this.device.queue.writeBuffer(this.buffers.mass, 0, massData.buffer, massData.byteOffset, massData.byteLength);
+        this.device.queue.writeBuffer(this.buffers.pos, 0, posData.buffer, posData.byteOffset, posData.byteLength);
+        this.device.queue.writeBuffer(this.buffers.vel, 0, velData.buffer, velData.byteOffset, velData.byteLength);
     }
 
     public getCommands(): GPUCommandBuffer {

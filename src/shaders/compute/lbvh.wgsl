@@ -1,17 +1,12 @@
 // STRUCTS
 
-struct FloatMetadata {
+struct Metadata {
+    num_bodies: u32,
     grav_constant: f32,
     delta_time: f32,
     epsilon_multiplier: f32,
+    bh_theta: f32,
     _pad: f32,
-    cam_center: vec2<f32>,
-    cam_half_size: vec2<f32>,
-    viewport: vec2<f32>,
-}
-
-struct UintMetadata {
-    num_bodies: u32,
 }
 
 struct NodeData {
@@ -30,12 +25,13 @@ struct NodeData {
 // BINDINGS AND BUFFERS
 
 // metadata buffers
-@group(0) @binding(0) var<uniform> float_metadata: FloatMetadata;
-@group(0) @binding(1) var<uniform> uint_metadata: UintMetadata;
+@group(0) @binding(0) var<uniform> metadata: Metadata;
 
 // data buffers
+@group(0) @binding(1) var<storage, read_write> mass_buf: array<f32>;
 @group(0) @binding(2) var<storage, read_write> pos_buf: array<vec2<f32>>;
-@group(0) @binding(3) var<storage, read_write> mass_buf: array<f32>;
+// @group(0) @binding(3) var<storage, read_write> vel_buf: array<vec2<f32>>; not needed here
+
 @group(0) @binding(4) var<storage, read_write> morton_codes: array<u32>;
 @group(0) @binding(5) var<storage, read_write> body_indices: array<u32>;
 
@@ -46,7 +42,7 @@ struct NodeData {
 @compute @workgroup_size(64)
 fn compute_morton_codes_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let i = global_id.x;
-    if i >= uint_metadata.num_bodies {
+    if i >= metadata.num_bodies {
         return;
     }
 
@@ -74,7 +70,7 @@ fn compute_morton_codes_main(@builtin(global_invocation_id) global_id: vec3<u32>
 
 
 fn delta(i: i32, j: i32) -> i32 {
-    if j < 0 || j >= i32(uint_metadata.num_bodies) {
+    if j < 0 || j >= i32(metadata.num_bodies) {
         return -1;
     }
     let a = morton_codes[u32(i)];
@@ -93,7 +89,7 @@ fn build_lbvh_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let i_u = global_id.x;
     let i = i32(i_u);
-    let n = uint_metadata.num_bodies;
+    let n = metadata.num_bodies;
 
     // internal nodes are indexed [0, n-2], leaves are [n-1, 2n-2]
     if i_u >= n - 1u {
@@ -171,7 +167,7 @@ fn build_lbvh_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 @compute @workgroup_size(64)
 fn fill_lbvh_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let n = uint_metadata.num_bodies;
+    let n = metadata.num_bodies;
     var curr_idx = (n - 1u) + global_id.x; // leaves are indexed [n-1, 2n-2]
 
     if curr_idx < (n - 1u) || curr_idx >= (2u * n - 1u) {
