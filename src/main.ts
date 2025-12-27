@@ -41,7 +41,8 @@ async function main() {
             sim.getCommands(),
             renderer.getCommands(sim.getNumBodies()),
         ]);
-
+        sim.updateMetadataBuffer(); // temporal coupling, improve this later?
+        
         frameCount++;
         if (now - lastLog >= 1000) {
             console.log(`FPS: ${frameCount}, Avg frame time: ${(1000 / frameCount).toFixed(2)} ms`);

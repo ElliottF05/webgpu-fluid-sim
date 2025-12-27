@@ -6,7 +6,7 @@ struct Metadata {
     delta_time: f32,
     epsilon_multiplier: f32,
     bh_theta: f32,
-    _pad0: u32,
+    offset: u32,
 }
 
 struct NodeData {
@@ -168,7 +168,8 @@ fn build_lbvh_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 @compute @workgroup_size(64)
 fn fill_lbvh_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let n = metadata.num_bodies;
-    var curr_idx = (n - 1u) + global_id.x; // leaves are indexed [n-1, 2n-2]
+    let i = (global_id.x + metadata.offset) % n; // try to alleviate race conditions
+    var curr_idx = (n - 1u) + i; // leaves are indexed [n-1, 2n-2]
 
     if curr_idx < (n - 1u) || curr_idx >= (2u * n - 1u) {
         return;

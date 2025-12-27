@@ -226,6 +226,7 @@ export class Simulation {
         metadataFloatView[2] = this.config.deltaTime;
         metadataFloatView[3] = this.config.epsilonMultiplier;
         metadataFloatView[4] = this.config.bhTheta;
+        metadataUintView[5] = Math.floor(Math.random() * this.numBodies);
 
         this.device.queue.writeBuffer(this.buffers.metadata, 0, metadataArray);
     }
