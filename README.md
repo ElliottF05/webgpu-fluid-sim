@@ -1,5 +1,5 @@
 # webgpu-nbody-sim
-A fast and light-weight n-body sim built using WebGPU compute shaders.
+A fast and lightweight n-body sim built using WebGPU compute shaders.
 
 ![img1](./images/img1.png)
 ![img2](./images/img2.png)
