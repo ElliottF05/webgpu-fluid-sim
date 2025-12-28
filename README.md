@@ -13,3 +13,6 @@ A fast and lightweight n-body sim built using WebGPU compute shaders.
 - Tone-mapping shader to aesthetically represent density without over-exposure.
 - Easy pan and zoom interactions.
 - Ability to select number of bodies and scenario (more to come soon?).
+
+## Personal Notes
+I built this project to explore GPU programming in a fun and accessible way. It was my first deep dive into this domain, and it was really satisfying to learn about the challenges specific to programming on GPUs and see it working in real-time. There are some areas I'd like to improve, such as finding a way to eliminate race conditions in tree construction due to WebGPU's lack of device-scope memory barriers.
