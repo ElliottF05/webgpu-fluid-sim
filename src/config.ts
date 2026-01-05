@@ -7,9 +7,9 @@ export type Config = Readonly<{
 }>;
 
 export function getDefaultConfig(): Config {
-    const gravConstant = 1.0;
+    const gravConstant = 10;
     const bhTheta = 0.6;
-    const substeps = 1;
+    const substeps = 10;
     const deltaTime = 0.1 * 1.0 / (60.0 * substeps);
     const epsilonMultiplier = 1.0;
 

@@ -232,9 +232,9 @@ fn fill_lbvh_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             node_data[parent_idx].center_of_mass = vec2<f32>(0.0);
         }
 
-        // compute length of longest side of AABB
+        // compute length of longest side of AABB (add 4 for collision detection margin)
         let aabb_size = node_data[parent_idx].aabb_max - node_data[parent_idx].aabb_min;
-        node_data[parent_idx].length = max(aabb_size.x, aabb_size.y);
+        node_data[parent_idx].length = max(aabb_size.x, aabb_size.y) + 2.0;
 
         // move up the tree
         curr_idx = parent_idx;

@@ -1,10 +1,10 @@
 # webgpu-nbody-sim
 A fast and lightweight n-body sim built using WebGPU compute shaders.
 
+[**View the live in-browser demo here!**](https://elliottf05.github.io/webgpu-nbody-sim/) _(use an updated version of Chrome for best results)_
+
 ![img1](./images/img1.png)
 ![img2](./images/img2.png)
-
-[View the live in-browser demo here!](https://elliottf05.github.io/webgpu-nbody-sim/)
 
 ## Features
 - Computation runs entirely on the GPU in parallel using WebGPU compute shaders.

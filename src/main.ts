@@ -18,7 +18,7 @@ async function main() {
     const interaction = new InteractionController(canvas, sim, renderer);
 
     // initial setup
-    sim.setNumBodies(50000);
+    sim.setNumBodies(5000);
     sim.setScenario("default");
     renderer.rebindPosBuffer(sim.getBuffers().pos);
     renderer.setNumBodies(sim.getNumBodies());
@@ -54,4 +54,8 @@ async function main() {
     requestAnimationFrame(frame);
 }
 
-await main();
+try {
+    await main();
+} catch (e) {
+    console.error("Fatal error:", e);
+}
