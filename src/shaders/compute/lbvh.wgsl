@@ -46,7 +46,7 @@ fn compute_morton_codes_main(@builtin(global_invocation_id) global_id: vec3<u32>
         return;
     }
 
-    let scale = 2000.0; // side length of the square region we map to
+    let scale = 2000.0; // side length of the square region to map to
     let half = 0.5 * scale;
 
     let pos = pos_buf[i];
@@ -188,29 +188,20 @@ fn fill_lbvh_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 
     // propagate up the tree
-    var count = 0u;
     while curr_idx != 0u {
-        count = count + 1u;
-        if count > 256u {
-            break; // prevent infinite loops
-        }
         let parent_idx = node_data[curr_idx].parent;
-
         if parent_idx == curr_idx {
             break; // reached root
-        }
-        if parent_idx >= (n - 1u) {
-            break; // should not happen, but just in case
         }
 
         // attempt to acquire lock on parent
         let prev_status = atomicAdd(&node_status[parent_idx], 1u);
         if prev_status == 0u {
-            // we are the first to arrive at this parent so break
+            // this thread is the first to arrive at this parent so break
             break;
         }
 
-        // we are the second to arrive at this parent, so we can compute its data
+        // this thread is the second to arrive at this parent, so now can compute its data
         let left_idx = node_data[parent_idx].left_child;
         let right_idx = node_data[parent_idx].right_child;
 

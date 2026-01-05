@@ -1,4 +1,3 @@
-// import { readBufferData } from "./buffers";
 import { getDefaultConfig } from "./config";
 import { initDeviceAndContext } from "./gpuSetup";
 import { InteractionController } from "./interaction";
@@ -14,7 +13,7 @@ async function main() {
 
     const sim = new Simulation(config, device);
     const renderer = new Renderer(device, canvas, context, canvasFormat, sim.getBuffers().pos);
-    // @ts-ignore 
+    // @ts-ignore - this isn't used after initialization, improve later?
     const interaction = new InteractionController(canvas, sim, renderer);
 
     // initial setup
@@ -36,12 +35,11 @@ async function main() {
         }
         lastFrame = now;
 
-        // interaction.sendUpdateToGPU();
         device.queue.submit([
             sim.getCommands(),
             renderer.getCommands(sim.getNumBodies()),
         ]);
-        sim.updateMetadataBuffer(); // temporal coupling, improve this later?
+        // sim.updateMetadataBuffer();
         
         frameCount++;
         if (now - lastLog >= 1000) {

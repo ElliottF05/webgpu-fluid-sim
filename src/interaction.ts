@@ -7,6 +7,7 @@ export class InteractionController {
     private readonly sim: Simulation;
     private readonly renderer: Renderer;
 
+    // interaction state
     private isMouseDown: boolean = false;
     private lastMouseCanvasPos: [number, number] = [0, 0];
     
@@ -23,12 +24,12 @@ export class InteractionController {
         this.addScenarioListener();
     }
 
+    // functions that coordinate updates affecting both simulation and renderer
     private updateNumBodies(numBodies: number) {
         this.sim.setNumBodies(numBodies);
         this.renderer.setNumBodies(this.sim.getNumBodies());
         this.renderer.rebindPosBuffer(this.sim.getBuffers().pos);
     }
-
     private updateScenario(scenario: SimScenario) {
         this.sim.setScenario(scenario);
         this.renderer.rebindPosBuffer(this.sim.getBuffers().pos);

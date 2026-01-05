@@ -1,7 +1,7 @@
 import { type Config } from "./config";
 import lbvhShaderCode from "./shaders/compute/lbvh.wgsl?raw";
 import barnesHutShaderCode from "./shaders/compute/barnes_hut.wgsl?raw";
-// @ts-ignore
+// @ts-ignore (no types available)
 import { RadixSortKernel } from "webgpu-radix-sort";
 
 
@@ -18,7 +18,7 @@ type SimBuffers = {
 
 type SimPipelines = {
     computeMorton: GPUComputePipeline;
-    sortMorton: any; // no ts type exposed for radix sort library
+    sortMorton: any; // no ts type available from radix sort library
     buildLBVH: GPUComputePipeline;
     fillLBVH: GPUComputePipeline;
     barnesHutVelStep: GPUComputePipeline;
@@ -33,22 +33,17 @@ type SimBindGroups = {
     barnesHutPosStep: GPUBindGroup;
 };
 
-export type SimScenario = "default" | "two-galaxies";
+export type SimScenario = "default" | "two-clusters";
 
 export class Simulation {
     // immutable config
     private readonly config: Config;
 
-    // gpu device
     private readonly device: GPUDevice;
-
-    // current scenario
     private currentScenario: SimScenario;
-
-    // num bodies
     private numBodies: number;
 
-    // GPU buffers, pipelines, and bind groups
+    // all the gpu buffers, pipelines, and bind groups needed by compute shaders
     private buffers: SimBuffers;
     private pipelines: SimPipelines;
     private bindGroups: SimBindGroups;
@@ -61,18 +56,15 @@ export class Simulation {
         this.device = device;
 
         this.currentScenario = "default";
-
-        // set up num bodies
         this.numBodies = 50000;
 
-        // set up GPU buffers, pipelines, and bind groups
+        // set up gpu buffers, pipelines, and bind groups
         this.buffers = this.createSimBuffers();
         this.pipelines = this.createSimPipelines();
         this.bindGroups = this.createSimBindGroups();
     }
 
     private createSimBuffers(): SimBuffers {
-        console.log(`Creating simulation buffers for ${this.numBodies} bodies.`);
         const metadata = this.device.createBuffer({
             size: 8 * 4,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -92,9 +84,9 @@ export class Simulation {
         const mortonCodes = createStorageBuffer(this.numBodies * 4);
         const bodyIndices = createStorageBuffer(this.numBodies * 4);
 
-        const numNodes = 2 * this.numBodies - 1;
-        const nodeData = createStorageBuffer(numNodes * 12 * 4);
-        const nodeStatus = createStorageBuffer(numNodes * 4);
+        const numLBVHNodes = 2 * this.numBodies - 1;
+        const nodeData = createStorageBuffer(numLBVHNodes * 12 * 4);
+        const nodeStatus = createStorageBuffer(numLBVHNodes * 4);
 
         return {
             metadata,
@@ -109,7 +101,6 @@ export class Simulation {
     }
 
     private createSimPipelines(): SimPipelines {
-        console.log(`Creating simulation pipelines for ${this.numBodies} bodies.`);
         const lbvhShaderModule = this.device.createShaderModule({
             code: lbvhShaderCode,
         });
@@ -156,7 +147,6 @@ export class Simulation {
     }
 
     private createSimBindGroups(): SimBindGroups {
-        console.log(`Creating simulation bind groups for ${this.numBodies} bodies.`);
         const computeMorton = this.device.createBindGroup({
             layout: this.pipelines.computeMorton.getBindGroupLayout(0),
             entries: [
@@ -238,7 +228,6 @@ export class Simulation {
     }
 
     public setScenario(scenario: SimScenario) {
-        // for now, only default scenario
         this.currentScenario = scenario;
 
         const massData = new Float32Array(this.numBodies);
@@ -269,9 +258,9 @@ export class Simulation {
                 velData[i * 2 + 0] = vx;
                 velData[i * 2 + 1] = vy;
             }
-        } else if (scenario === "two-galaxies") {
-            // two orbiting galaxies
-            const galaxyOffset = 15.0;
+        } else if (scenario === "two-clusters") {
+            // two orbiting "clusters"
+            const clusterOffset = 15.0;
             const radius = 3.0;
             const speedFactor = 0.12;
             for (let i = 0; i < this.numBodies; i++) {
@@ -286,16 +275,16 @@ export class Simulation {
 
                 let x: number, y: number;
                 if (i < this.numBodies / 2) {
-                    x = xBase - galaxyOffset;
+                    x = xBase - clusterOffset;
                     y = yBase;
                 } else {
-                    x = xBase + galaxyOffset;
+                    x = xBase + clusterOffset;
                     y = yBase;
                 }
                 posData[i * 2 + 0] = x;
                 posData[i * 2 + 1] = y;
 
-                // velocity (circular orbit around galaxy center)
+                // velocity (circular orbit around cluster center)
                 const dist = Math.sqrt(xBase * xBase + yBase * yBase);
                 const speed = speedFactor * Math.sqrt(this.config.gravConstant * (this.numBodies / 2) / dist);
                 let vx: number, vy: number;

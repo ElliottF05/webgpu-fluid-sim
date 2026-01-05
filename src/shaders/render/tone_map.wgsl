@@ -71,7 +71,7 @@ fn fragment_main(in: VSOut) -> @location(0) vec4<f32> {
     let exposure = 8.0; // change this
     let x = exposure * density;
 
-    // tone mapping (Reinhard)
+    // tone mapping (reinhard)
     let mapped = x / (1.0 + x);
 
     // gamma correction
