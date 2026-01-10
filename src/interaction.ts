@@ -28,11 +28,11 @@ export class InteractionController {
     private updateNumBodies(numBodies: number) {
         this.sim.setNumBodies(numBodies);
         this.renderer.setNumBodies(this.sim.getNumBodies());
-        this.renderer.rebindPosBuffer(this.sim.getBuffers().pos);
+        this.renderer.rebindSimBuffers(this.sim.getBuffers().pos, this.sim.getBuffers().radiusMultiplier);
     }
     private updateScenario(scenario: SimScenario) {
         this.sim.setScenario(scenario);
-        this.renderer.rebindPosBuffer(this.sim.getBuffers().pos);
+        this.renderer.rebindSimBuffers(this.sim.getBuffers().pos, this.sim.getBuffers().radiusMultiplier);
     }
 
     private clientToCanvasCoords(clientX: number, clientY: number): [number, number] {

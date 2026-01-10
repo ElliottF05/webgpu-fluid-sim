@@ -14,6 +14,7 @@ type SimBuffers = {
     bodyIndices: GPUBuffer;
     nodeData: GPUBuffer;
     nodeStatus: GPUBuffer;
+    radiusMultiplier: GPUBuffer;
 };
 
 type SimPipelines = {
@@ -33,7 +34,7 @@ type SimBindGroups = {
     barnesHutPosStep: GPUBindGroup;
 };
 
-export type SimScenario = "default" | "two-clusters";
+export type SimScenario = "default" | "two-clusters" | "planetary-disk";
 
 export class Simulation {
     // immutable config
@@ -83,6 +84,7 @@ export class Simulation {
         const vel = createStorageBuffer(this.numBodies * 2 * 4);
         const mortonCodes = createStorageBuffer(this.numBodies * 4);
         const bodyIndices = createStorageBuffer(this.numBodies * 4);
+        const radiusMultiplier = createStorageBuffer(this.numBodies * 4);
 
         const numLBVHNodes = 2 * this.numBodies - 1;
         const nodeData = createStorageBuffer(numLBVHNodes * 12 * 4);
@@ -97,6 +99,7 @@ export class Simulation {
             bodyIndices,
             nodeData,
             nodeStatus,
+            radiusMultiplier,
         };
     }
 
@@ -234,6 +237,9 @@ export class Simulation {
         const posData = new Float32Array(this.numBodies * 2);
         const velData = new Float32Array(this.numBodies * 2);
 
+        const radiusMultiplierData = new Float32Array(this.numBodies);
+        radiusMultiplierData.fill(1.0);
+
         if (scenario === "default") {
             // 2d gaussian distribution
             const radius = 5.0;
@@ -298,6 +304,62 @@ export class Simulation {
                 velData[i * 2 + 0] = vx;
                 velData[i * 2 + 1] = vy;
             }
+
+        } else if (scenario === "planetary-disk") {
+            const diskMax = 15.0;
+            const diskMin = 0.1;
+            const centralMass = 1000.0;
+            const planetMass = 10.0;
+            const bodyMass = centralMass / (100.0 * this.numBodies);
+
+            // central massive body
+            massData[0] = centralMass;
+            posData[0] = 0.0;
+            posData[1] = 0.0;
+            velData[0] = 0.0;
+            velData[1] = 0.0;
+            radiusMultiplierData[0] = 12.0;
+
+            // orbiting planet
+            massData[1] = planetMass;
+            posData[2] = 2.5;
+            posData[3] = 0.0;
+            const planetSpeed = 0.8 * Math.sqrt(this.config.gravConstant * centralMass / 2.5);
+            velData[2] = 0.0;
+            velData[3] = planetSpeed;
+            radiusMultiplierData[1] = 5.0;
+
+            // another orbiting planet
+            massData[2] = planetMass;
+            posData[4] = 12.0;
+            posData[5] = 0.0;
+            const planetSpeed2 = Math.sqrt(this.config.gravConstant * centralMass / 12.5);
+            velData[4] = 0.0;
+            velData[5] = planetSpeed2;
+            radiusMultiplierData[2] = 5.0;
+
+            // many small bodies
+            for (let i = 3; i < this.numBodies; i++) {
+                // mass
+                massData[i] = bodyMass;
+
+                // position
+                const angle = Math.random() * 2.0 * Math.PI;
+                const r = Math.sqrt(Math.random() * (diskMax * diskMax - diskMin * diskMin) + diskMin * diskMin);
+                const x = r * Math.cos(angle);
+                const y = r * Math.sin(angle);
+                posData[i * 2 + 0] = x;
+                posData[i * 2 + 1] = y;
+
+                // velocity (circular orbit around center)
+                const dist = Math.sqrt(x * x + y * y);
+                const speed = 1.01 * Math.sqrt(this.config.gravConstant * centralMass / (2.0 + dist));
+                const vx = -speed * (y / dist);
+                const vy = speed * (x / dist);
+                velData[i * 2 + 0] = vx;
+                velData[i * 2 + 1] = vy;
+            }
+
         } else {
             throw new Error(`Unknown scenario: ${scenario}`);
         }
@@ -308,12 +370,17 @@ export class Simulation {
 
         this.updateMetadataBuffer();
         this.updatePhysicsBuffers(massData, posData, velData);
+        this.updateRadiusMultiplierBuffer(radiusMultiplierData);
     }
 
     private updatePhysicsBuffers(massData: Float32Array, posData: Float32Array, velData: Float32Array) {
         this.device.queue.writeBuffer(this.buffers.mass, 0, massData.buffer, massData.byteOffset, massData.byteLength);
         this.device.queue.writeBuffer(this.buffers.pos, 0, posData.buffer, posData.byteOffset, posData.byteLength);
         this.device.queue.writeBuffer(this.buffers.vel, 0, velData.buffer, velData.byteOffset, velData.byteLength);
+    }
+
+    private updateRadiusMultiplierBuffer(radiusMultiplierData: Float32Array) {
+        this.device.queue.writeBuffer(this.buffers.radiusMultiplier, 0, radiusMultiplierData.buffer, radiusMultiplierData.byteOffset, radiusMultiplierData.byteLength);
     }
 
     public getCommands(): GPUCommandBuffer {

@@ -12,14 +12,14 @@ async function main() {
     const { device, context, canvasFormat, canvas } = await initDeviceAndContext("webgpu-canvas");
 
     const sim = new Simulation(config, device);
-    const renderer = new Renderer(device, canvas, context, canvasFormat, sim.getBuffers().pos);
+    const renderer = new Renderer(device, canvas, context, canvasFormat, sim.getBuffers().pos, sim.getBuffers().radiusMultiplier);
     // @ts-ignore - this isn't used after initialization, improve later?
     const interaction = new InteractionController(canvas, sim, renderer);
 
     // initial setup
     sim.setNumBodies(50000);
     sim.setScenario("default");
-    renderer.rebindPosBuffer(sim.getBuffers().pos);
+    renderer.rebindSimBuffers(sim.getBuffers().pos, sim.getBuffers().radiusMultiplier);
     renderer.setNumBodies(sim.getNumBodies());
 
     let lastFrame = performance.now();

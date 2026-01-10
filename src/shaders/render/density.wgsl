@@ -11,7 +11,7 @@ struct Metadata {
 struct VSOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) uv: vec2<f32>, // quad local coords in [-1,1]
-    @location(1) @interpolate(flat) radius_px: f32,
+    @location(1) @interpolate(flat) radius_multiplier: f32,
 };
 
 
@@ -22,6 +22,7 @@ struct VSOut {
 
 // data buffers
 @group(0) @binding(1) var<storage, read> pos: array<vec2<f32>>;
+@group(0) @binding(2) var<storage, read> radius_multiplier: array<f32>;
 
 
 // HELPER FUNCTIONS
@@ -50,21 +51,21 @@ fn vertex_main(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u3
     if iid >= metadata.num_bodies {
         out.pos = vec4<f32>(2.0, 2.0, 0.0, 1.0); // offscreen
         out.uv = vec2<f32>(0.0);
-        out.radius_px = 0.0;
+        out.radius_multiplier = 1.0;
         return out;
     }
 
     let world_pos = pos[iid];
     let center_ndc = world_to_ndc(world_pos);
 
-    var radius_px = 2.0;
+    var radius_px = 2.0 * radius_multiplier[iid];
     let px_to_ndc = 2.0 / metadata.viewport;
     let radius_ndc = radius_px * px_to_ndc;
 
     let uv = quad[vid];
     out.pos = vec4<f32>(center_ndc + uv * radius_ndc, 0.0, 1.0);
     out.uv = uv;
-    out.radius_px = radius_px;
+    out.radius_multiplier = radius_multiplier[iid];
 
     return out;
 }
@@ -78,14 +79,18 @@ fn fragment_main(in: VSOut) -> @location(0) vec4<f32> {
         discard;
     }
 
-    let k = 4.0; // higher = sharper
+    // let k = 4.0; // higher = sharper
+    let k = 10.0;
     let w = exp(-k * r * r);
 
     // compensate for zoom by reducing per-pixel contribution when zoomed out
     let zoom = max(metadata.cam_half_size.x, metadata.cam_half_size.y);
     let zoom_scale = 1.0 / (1.0 + 0.05 * zoom); // tweak 0.05 to adjust falloff speed
 
-    let base = 0.02; // change this to adjust overall brightness
+    var base = 0.02; // change this to adjust overall brightness
+    if in.radius_multiplier > 1.0 {
+        base = 0.1; // scale with area
+    }
 
     let density = base * w * zoom_scale;
 

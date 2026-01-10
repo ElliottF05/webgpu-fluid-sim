@@ -40,7 +40,7 @@ export class Renderer {
 
     // INITIALIZATION
 
-    public constructor(device: GPUDevice, canvas: HTMLCanvasElement, context: GPUCanvasContext, canvasFormat: GPUTextureFormat, initialPosBuffer: GPUBuffer) {
+    public constructor(device: GPUDevice, canvas: HTMLCanvasElement, context: GPUCanvasContext, canvasFormat: GPUTextureFormat, initialPosBuffer: GPUBuffer, initialRadiusMultiplierBuffer: GPUBuffer) {
         this.device = device;
         this.canvas = canvas;
         this.context = context;
@@ -54,7 +54,7 @@ export class Renderer {
         // GPU buffers, pipelines, and bind groups
         this.buffers = this.createRenderBuffers();
         this.pipelines = this.createRenderPipelines();
-        this.bindGroups = this.createRenderBindGroups(initialPosBuffer);
+        this.bindGroups = this.createRenderBindGroups(initialPosBuffer, initialRadiusMultiplierBuffer);
 
         // initial resize
         this.resizeCanvasToDisplaySize();
@@ -144,12 +144,13 @@ export class Renderer {
         };
     }
 
-    private createRenderBindGroups(posBuffer: GPUBuffer): RenderBindGroups {
+    private createRenderBindGroups(posBuffer: GPUBuffer, radiusMultiplierBuffer: GPUBuffer): RenderBindGroups {
         const density = this.device.createBindGroup({
             layout: this.pipelines.density.getBindGroupLayout(0),
             entries: [
                 { binding: 0, resource: { buffer: this.buffers.metadataBuffer } },
                 { binding: 1, resource: { buffer: posBuffer } },
+                { binding: 2, resource: { buffer: radiusMultiplierBuffer } },
             ],
         });
 
@@ -203,13 +204,14 @@ export class Renderer {
         });
     }
 
-    public rebindPosBuffer(posBuffer: GPUBuffer) {
-        // recreate density bind group with new position buffer
+    public rebindSimBuffers(posBuffer: GPUBuffer, radiusMultiplierBuffer: GPUBuffer) {
+        // recreate density bind group with new position buffer and radius multiplier buffer
         this.bindGroups.density = this.device.createBindGroup({
             layout: this.pipelines.density.getBindGroupLayout(0),
             entries: [
                 { binding: 0, resource: { buffer: this.buffers.metadataBuffer } },
                 { binding: 1, resource: { buffer: posBuffer } },
+                { binding: 2, resource: { buffer: radiusMultiplierBuffer } },
             ],
         });
     }
